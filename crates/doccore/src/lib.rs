@@ -9,6 +9,7 @@ pub mod arena;
 pub mod bson_read;
 pub mod bson_write;
 pub mod document;
+pub mod edit;
 pub mod error;
 pub mod expand;
 pub mod json_read;
@@ -22,6 +23,7 @@ mod testutil;
 
 pub use arena::{Doc, Kind, Node, Span, Stats, MAX_DEPTH, NO_NODE};
 pub use document::{load, load_text, looks_like_json, Saved};
+pub use edit::Value;
 pub use error::{Error, Result};
 pub use expand::Expansion;
 pub use magic::Framing;

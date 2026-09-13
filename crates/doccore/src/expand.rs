@@ -72,10 +72,11 @@ pub fn expand(doc: &mut Doc, max_depth: u8) -> Expansion {
         // Most strings are not JSON, so a failed parse is the common case and
         // has to leave no trace: undo every node, child slot and blob byte the
         // attempt allocated.
-        let undo = Checkpoint::take(doc);
+        let undo = doc.checkpoint();
         match parse_json(&scratch, doc) {
             Ok(root) => {
                 report.overlays_created += 1;
+                doc.overlay_count += 1;
                 let owner = &mut doc.nodes[id as usize];
                 owner.overlay = root;
                 owner.sub = level + 1;
@@ -104,40 +105,6 @@ fn expandable(kind: Kind) -> bool {
 /// almost every string in a typical document.
 fn starts_container(bytes: &[u8]) -> bool {
     matches!(bytes.iter().find(|b| !b.is_ascii_whitespace()), Some(b'{') | Some(b'['))
-}
-
-/// Arena sizes before a speculative parse, so a failure can be rolled back.
-struct Checkpoint {
-    nodes: usize,
-    children: usize,
-    blob: usize,
-    containers: usize,
-    max_depth: u32,
-}
-
-impl Checkpoint {
-    fn take(doc: &Doc) -> Checkpoint {
-        Checkpoint {
-            nodes: doc.nodes.len(),
-            children: doc.children.len(),
-            blob: doc.blob.len(),
-            containers: doc.containers.len(),
-            max_depth: doc.max_depth,
-        }
-    }
-
-    fn restore(self, doc: &mut Doc) {
-        doc.nodes.truncate(self.nodes);
-        doc.children.truncate(self.children);
-        doc.blob.truncate(self.blob);
-        doc.containers.truncate(self.containers);
-        doc.max_depth = self.max_depth;
-        // The parse died with containers still open, so its half-finished work
-        // is still sitting on the stack. Leaving it there would make the next
-        // `close()` bind children to the wrong parent.
-        doc.stack.clear();
-        doc.depth = 0;
-    }
 }
 
 #[cfg(test)]

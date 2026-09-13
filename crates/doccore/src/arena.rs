@@ -268,6 +268,10 @@ pub struct Doc {
     /// Nodes unlinked by an edit. Their ids stay reserved so a stale id in the
     /// webview resolves to an error instead of someone else's node.
     pub(crate) removed: HashSet<u32>,
+    /// How many string nodes currently own an embedded-JSON overlay. Tracked
+    /// rather than derived: [`Doc::refresh_stats`] runs after every edit, and
+    /// scanning 1.7M nodes to count them would make each keystroke visible.
+    pub(crate) overlay_count: usize,
 
     pub(crate) root: u32,
     pub format: Format,
@@ -303,6 +307,7 @@ impl Doc {
             depth: 0,
             max_depth: 0,
             removed: HashSet::new(),
+            overlay_count: 0,
             root: NO_NODE,
             format,
             magic: Vec::new(),
@@ -576,7 +581,6 @@ impl Doc {
     }
 
     pub(crate) fn refresh_stats(&mut self) {
-        let overlay_nodes = self.nodes.iter().filter(|n| n.overlay != NO_NODE).count();
         self.stats = Stats {
             node_count: self.nodes.len(),
             container_count: self.containers.len(),
@@ -587,7 +591,7 @@ impl Doc {
             document_count: self.document_count.max(1),
             magic_bytes: self.magic.len(),
             trailing_bytes: self.trailing.len(),
-            overlay_nodes,
+            overlay_nodes: self.overlay_count,
             heap_bytes: self.nodes.len() * std::mem::size_of::<Node>()
                 + self.children.len() * 4
                 + self.blob.len()
@@ -661,6 +665,19 @@ impl Doc {
         Ok(child)
     }
 
+    /// Snapshot the arena so a speculative parse can be undone.
+    #[inline]
+    pub(crate) fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            nodes: self.nodes.len(),
+            children: self.children.len(),
+            blob: self.blob.len(),
+            containers: self.containers.len(),
+            overlay_count: self.overlay_count,
+            max_depth: self.max_depth,
+        }
+    }
+
     /// Mark a whole subtree unreachable without renumbering anything.
     pub fn mark_removed(&mut self, root: u32) {
         let mut work = vec![root];
@@ -670,6 +687,7 @@ impl Doc {
             }
             let n = *self.node_at(id);
             if n.overlay != NO_NODE {
+                self.overlay_count -= 1;
                 work.push(n.overlay);
             }
             if n.aux != NO_NODE {
@@ -677,6 +695,35 @@ impl Doc {
             }
             work.extend(self.children(id));
         }
+    }
+}
+
+/// Arena sizes before a speculative parse, so a failure can be rolled back.
+///
+/// Both the embedded-JSON expander and the editor parse into a live arena and
+/// have to leave no trace when the input turns out not to be JSON.
+pub(crate) struct Checkpoint {
+    nodes: usize,
+    children: usize,
+    blob: usize,
+    containers: usize,
+    overlay_count: usize,
+    max_depth: u32,
+}
+
+impl Checkpoint {
+    pub(crate) fn restore(self, doc: &mut Doc) {
+        doc.nodes.truncate(self.nodes);
+        doc.children.truncate(self.children);
+        doc.blob.truncate(self.blob);
+        doc.containers.truncate(self.containers);
+        doc.overlay_count = self.overlay_count;
+        doc.max_depth = self.max_depth;
+        // The parse died with containers still open, so its half-finished work
+        // is still sitting on the stack. Leaving it there would make the next
+        // `close()` bind children to the wrong parent.
+        doc.stack.clear();
+        doc.depth = 0;
     }
 }
 
