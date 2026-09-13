@@ -1,0 +1,5 @@
+edition = "2021"
+max_width = 100
+# Keeps short struct literals and signatures on one line, which suits the
+# dense, numeric code in the arena and codecs.
+use_small_heuristics = "Max"

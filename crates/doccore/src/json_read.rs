@@ -29,11 +29,7 @@ pub fn parse_json(bytes: &[u8], doc: &mut Doc) -> Result<u32> {
 }
 
 fn map_err(err: serde_json::Error) -> Error {
-    Error::Json {
-        message: err.to_string(),
-        line: err.line(),
-        column: err.column(),
-    }
+    Error::Json { message: err.to_string(), line: err.line(), column: err.column() }
 }
 
 /// Routes one JSON value into the arena. Reused by the embedded-JSON-string
@@ -255,20 +251,14 @@ mod tests {
     #[test]
     fn trailing_garbage_is_rejected() {
         let mut doc = Doc::new(Format::Json);
-        assert!(matches!(
-            parse_json(b"{} {}", &mut doc),
-            Err(Error::Json { .. })
-        ));
+        assert!(matches!(parse_json(b"{} {}", &mut doc), Err(Error::Json { .. })));
     }
 
     #[test]
     fn empty_input_is_rejected() {
         let mut doc = Doc::new(Format::Json);
         assert!(matches!(parse_json(b"   ", &mut doc), Err(Error::Empty)));
-        assert!(matches!(
-            parse_json(b"{", &mut doc),
-            Err(Error::Json { .. })
-        ));
+        assert!(matches!(parse_json(b"{", &mut doc), Err(Error::Json { .. })));
     }
 
     #[test]

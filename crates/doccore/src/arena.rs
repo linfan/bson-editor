@@ -42,10 +42,7 @@ pub struct Span {
 }
 
 impl Span {
-    pub const NONE: Span = Span {
-        off: NO_NODE,
-        len: 0,
-    };
+    pub const NONE: Span = Span { off: NO_NODE, len: 0 };
 
     #[inline]
     pub fn is_none(self) -> bool {
@@ -128,10 +125,7 @@ impl Kind {
 
     #[inline]
     pub fn is_number(self) -> bool {
-        matches!(
-            self,
-            Kind::Double | Kind::Int32 | Kind::Int64 | Kind::UInt64 | Kind::Decimal128
-        )
+        matches!(self, Kind::Double | Kind::Int32 | Kind::Int64 | Kind::UInt64 | Kind::Decimal128)
     }
 
     /// Short label shown as a badge in the tree.
@@ -173,6 +167,8 @@ pub struct Node {
     /// * [`Kind::Str`] with an overlay — how many levels of JSON-string
     ///   unwrapping sit below this node.
     pub sub: u8,
+    /// Bit flags, see [`Node::OVERLAY_DIRTY`].
+    pub flags: u8,
     /// Root of the parsed structure hidden inside a string value, or
     /// [`NO_NODE`]. Requirement 2.
     pub overlay: u32,
@@ -202,11 +198,17 @@ pub struct Node {
 }
 
 impl Node {
+    /// Marks a string node whose embedded-JSON overlay has been edited, so
+    /// serialization must regenerate the string from the overlay instead of
+    /// writing the stale raw text.
+    pub const OVERLAY_DIRTY: u8 = 1;
+
     #[inline]
     pub fn new(kind: Kind) -> Node {
         Node {
             kind,
             sub: 0,
+            flags: 0,
             overlay: NO_NODE,
             aux: NO_NODE,
             parent: NO_NODE,
@@ -452,10 +454,51 @@ impl Doc {
     pub(crate) fn push_blob(&mut self, bytes: &[u8]) -> Span {
         let off = self.blob.len() as u32;
         self.blob.extend_from_slice(bytes);
-        Span {
-            off,
-            len: bytes.len() as u32,
+        Span { off, len: bytes.len() as u32 }
+    }
+
+    /// Pack several byte slices into one blob region separated by NUL bytes and
+    /// return the span covering all of them. This is how the two-part payloads
+    /// share a single `val` span: regex pattern plus options, and DBPointer
+    /// namespace plus object id.
+    pub(crate) fn push_joined(&mut self, parts: &[&[u8]]) -> Span {
+        let off = self.blob.len() as u32;
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 {
+                self.blob.push(0);
+            }
+            self.blob.extend_from_slice(part);
         }
+        Span { off, len: self.blob.len() as u32 - off }
+    }
+
+    /// Flag every string node that owns an overlay containing `node`.
+    ///
+    /// An edit inside embedded JSON has to invalidate the whole chain of
+    /// enclosing strings, not just the nearest one, or an outer string would
+    /// still serialize its stale raw text and silently swallow the change.
+    pub fn mark_overlay_dirty(&mut self, node: u32) {
+        let mut cur = node;
+        let mut guard = 0usize;
+        while cur != NO_NODE {
+            let n = &mut self.nodes[cur as usize];
+            if n.overlay != NO_NODE {
+                n.flags |= Node::OVERLAY_DIRTY;
+            }
+            cur = n.parent;
+            guard += 1;
+            if guard > self.nodes.len() {
+                break;
+            }
+        }
+    }
+
+    /// Does this string node's overlay take precedence over its raw text when
+    /// serializing?
+    #[inline]
+    pub fn overlay_is_authoritative(&self, id: u32) -> bool {
+        let n = self.node_at(id);
+        n.overlay != NO_NODE && n.flags & Node::OVERLAY_DIRTY != 0
     }
 
     #[inline]
@@ -675,10 +718,7 @@ mod tests {
 
         doc.insert_child(a, 0, b);
         assert_eq!(doc.children(a), &[b]);
-        assert!(
-            doc.children(b).is_empty(),
-            "b must stay empty after a gains a child"
-        );
+        assert!(doc.children(b).is_empty(), "b must stay empty after a gains a child");
         assert_eq!(doc.parent_of(b), a);
     }
 
@@ -705,11 +745,7 @@ mod tests {
         doc.insert_child(arr1, 0, fresh);
 
         assert_eq!(doc.children(arr1), &[fresh, v]);
-        assert_eq!(
-            doc.children(arr2),
-            &[w],
-            "later range must follow the insert"
-        );
+        assert_eq!(doc.children(arr2), &[w], "later range must follow the insert");
         assert_eq!(doc.children(root), &[arr1, arr2]);
         assert_eq!(doc.path_to(v).unwrap(), vec![root, arr1, v]);
     }

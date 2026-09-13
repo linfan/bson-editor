@@ -4,6 +4,8 @@
 //! numbers and a table-driven escaper for strings, so formatting a 10MB
 //! document allocates nothing beyond the output itself.
 
+use std::borrow::Cow;
+
 use crate::arena::{Doc, Kind, Node, MAX_DEPTH, NO_NODE};
 use crate::error::Result;
 use crate::numfmt;
@@ -125,8 +127,8 @@ impl<'a> Writer<'a> {
             Kind::Object => self.object(doc, id, depth),
             Kind::Array => self.array(doc, id, depth),
             Kind::Str => {
-                let bytes = doc.raw(n.val);
-                self.escaped(bytes);
+                let bytes = string_payload(doc, n)?;
+                self.escaped(&bytes);
                 Ok(())
             }
             Kind::Double => {
@@ -199,11 +201,7 @@ impl<'a> Writer<'a> {
                 Ok(())
             }
             Kind::Undefined => {
-                self.push(if extended {
-                    b"{\"$undefined\":true}"
-                } else {
-                    b"null"
-                });
+                self.push(if extended { b"{\"$undefined\":true}" } else { b"null" });
                 Ok(())
             }
             Kind::ObjectId => {
@@ -312,11 +310,7 @@ impl<'a> Writer<'a> {
             Kind::MinKey | Kind::MaxKey => {
                 let min = n.kind == Kind::MinKey;
                 if extended {
-                    self.push(if min {
-                        b"{\"$minKey\":1}"
-                    } else {
-                        b"{\"$maxKey\":1}"
-                    });
+                    self.push(if min { b"{\"$minKey\":1}" } else { b"{\"$maxKey\":1}" });
                 } else {
                     self.escaped(if min { b"$minKey" } else { b"$maxKey" });
                 }
@@ -393,6 +387,21 @@ impl<'a> Writer<'a> {
     }
 }
 
+/// The bytes a string node contributes to the output.
+///
+/// Normally that is the stored text. When the node's embedded-JSON overlay has
+/// been edited the overlay is authoritative instead, and is re-serialized to
+/// compact JSON so the change lands back inside the escaped string — that is
+/// what makes editing an expanded JSON string persist (requirement 2).
+pub(crate) fn string_payload(doc: &Doc, n: Node) -> Result<Cow<'_, [u8]>> {
+    if n.overlay != NO_NODE && n.flags & Node::OVERLAY_DIRTY != 0 {
+        let mut out = Vec::with_capacity(n.val.len as usize + 16);
+        write_json(doc, n.overlay, &JsonOptions::compact(), &mut out)?;
+        return Ok(Cow::Owned(out));
+    }
+    Ok(Cow::Borrowed(doc.raw(n.val)))
+}
+
 /// Split a blob region that packs two NUL-separated parts (regex pattern and
 /// options, or a DBPointer namespace and id).
 pub(crate) fn split_nul(bytes: &[u8]) -> (&[u8], &[u8]) {
@@ -445,10 +454,7 @@ mod tests {
     #[test]
     fn tab_indent_is_supported() {
         let d = doc(r#"{"a":[1]}"#);
-        let opts = JsonOptions {
-            indent: Indent::Tab,
-            ..Default::default()
-        };
+        let opts = JsonOptions { indent: Indent::Tab, ..Default::default() };
         assert_eq!(render(&d, d.root(), &opts), "{\n\t\"a\": [\n\t\t1\n\t]\n}");
     }
 
@@ -458,14 +464,8 @@ mod tests {
         let a = d.children(d.root())[0];
         let deep = d.children(a)[0];
         assert_eq!(render(&d, deep, &JsonOptions::compact()), "[1,2,3]");
-        assert_eq!(
-            render(&d, d.children(deep)[1], &JsonOptions::compact()),
-            "2"
-        );
-        assert_eq!(
-            render(&d, a, &JsonOptions::compact()),
-            r#"{"deep":[1,2,3]}"#
-        );
+        assert_eq!(render(&d, d.children(deep)[1], &JsonOptions::compact()), "2");
+        assert_eq!(render(&d, a, &JsonOptions::compact()), r#"{"deep":[1,2,3]}"#);
     }
 
     #[test]
@@ -501,15 +501,9 @@ mod tests {
     fn max_depth_truncates_with_an_ellipsis() {
         let d = doc(r#"{"a":{"b":{"c":1}}}"#);
         // The root is depth 0, so `Some(0)` keeps the root and cuts its children.
-        let at_zero = JsonOptions {
-            max_depth: Some(0),
-            ..JsonOptions::compact()
-        };
+        let at_zero = JsonOptions { max_depth: Some(0), ..JsonOptions::compact() };
         assert_eq!(render(&d, d.root(), &at_zero), r#"{"a":…}"#);
-        let at_one = JsonOptions {
-            max_depth: Some(1),
-            ..JsonOptions::compact()
-        };
+        let at_one = JsonOptions { max_depth: Some(1), ..JsonOptions::compact() };
         assert_eq!(render(&d, d.root(), &at_one), r#"{"a":{"b":…}}"#);
     }
 
@@ -525,10 +519,7 @@ mod tests {
         // 40 levels of nesting, well past one indent pad's worth of columns.
         let text = format!("{}{}", "[".repeat(40), "]".repeat(40));
         let d = doc(&text);
-        let opts = JsonOptions {
-            indent: Indent::Spaces(8),
-            ..Default::default()
-        };
+        let opts = JsonOptions { indent: Indent::Spaces(8), ..Default::default() };
         let out = render(&d, d.root(), &opts);
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines.len(), 79);

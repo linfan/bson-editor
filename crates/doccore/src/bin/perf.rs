@@ -9,7 +9,7 @@
 
 use std::time::{Duration, Instant};
 
-use doccore::opts::{Flavor, Indent, JsonOptions, LoadOptions};
+use doccore::opts::{Flavor, Format, Indent, JsonOptions, LoadOptions, SaveOptions};
 use doccore::{document, Doc, Kind};
 
 /// Number of elements in the one deliberately large nested array, so the
@@ -17,19 +17,12 @@ use doccore::{document, Doc, Kind};
 const BIG_NESTED_ARRAY: u64 = 50_000;
 
 fn main() {
-    let target_mb: usize = std::env::args()
-        .nth(1)
-        .and_then(|a| a.parse().ok())
-        .unwrap_or(12);
+    let target_mb: usize = std::env::args().nth(1).and_then(|a| a.parse().ok()).unwrap_or(12);
     let target = target_mb * 1024 * 1024;
 
     let started = Instant::now();
     let fixture = build_json(target);
-    println!(
-        "fixture       {:>7.2} MB  built in {}",
-        mb(fixture.len()),
-        show(started.elapsed())
-    );
+    println!("fixture       {:>7.2} MB  built in {}", mb(fixture.len()), show(started.elapsed()));
 
     let started = Instant::now();
     let doc = document::load(fixture.as_bytes().to_vec(), LoadOptions::default())
@@ -62,13 +55,7 @@ fn main() {
 
     let started = Instant::now();
     let pretty = doc
-        .to_json(
-            doc.root(),
-            &JsonOptions {
-                indent: Indent::Spaces(2),
-                ..Default::default()
-            },
-        )
+        .to_json(doc.root(), &JsonOptions { indent: Indent::Spaces(2), ..Default::default() })
         .unwrap();
     let pretty_t = started.elapsed();
     println!(
@@ -80,13 +67,7 @@ fn main() {
 
     let started = Instant::now();
     let extended = doc
-        .to_json(
-            doc.root(),
-            &JsonOptions {
-                flavor: Flavor::Extended,
-                ..JsonOptions::compact()
-            },
-        )
+        .to_json(doc.root(), &JsonOptions { flavor: Flavor::Extended, ..JsonOptions::compact() })
         .unwrap();
     let extended_t = started.elapsed();
     println!(
@@ -102,18 +83,15 @@ fn main() {
         let subtree = if label == "largest subtree" {
             largest_nested_array(&doc)
         } else {
-            doc.child_at(doc.root(), 0).expect("fixture has records")
+            // The second record: the first carries the deliberately oversized
+            // history array, so it would not represent a typical copy.
+            let records = doc.child_at(doc.root(), 0).expect("fixture has a records array");
+            doc.child_at(records, 1).expect("fixture has more than one record")
         };
         let nodes = doc.subtree_size(subtree);
         let started = Instant::now();
         let copied = doc
-            .to_json(
-                subtree,
-                &JsonOptions {
-                    indent: Indent::Spaces(2),
-                    ..Default::default()
-                },
-            )
+            .to_json(subtree, &JsonOptions { indent: Indent::Spaces(2), ..Default::default() })
             .unwrap();
         println!(
             "copy {label:<11} {:>7.2} KB  in {}  ({} nodes)",
@@ -127,22 +105,49 @@ fn main() {
     // for byte, so formatting is stable and lossless.
     let started = Instant::now();
     let reparsed = document::load(compact.as_bytes().to_vec(), LoadOptions::default()).unwrap();
-    let again = reparsed
-        .to_json(reparsed.root(), &JsonOptions::compact())
-        .unwrap();
+    let again = reparsed.to_json(reparsed.root(), &JsonOptions::compact()).unwrap();
     assert_eq!(again, compact, "round-trip changed the document");
     assert_eq!(reparsed.stats.node_count, doc.stats.node_count);
+    println!("json round-trip {:>5}     verified in {}", "ok", show(started.elapsed()));
+
+    // The same exercise for BSON, which is the format this editor exists for.
+    let started = Instant::now();
+    let encoded = doc
+        .save(&SaveOptions { format: Some(Format::Bson), ..Default::default() })
+        .expect("fixture must be representable as BSON");
+    let encode = started.elapsed();
+    assert!(encoded.warnings.is_empty(), "{:?}", encoded.warnings);
     println!(
-        "round-trip    {:>7}       verified in {}",
-        "ok",
-        show(started.elapsed())
+        "bson encode   {:>7.2} MB/s  in {}  -> {:.2} MB",
+        throughput(encoded.bytes.len(), encode),
+        show(encode),
+        mb(encoded.bytes.len())
     );
+
+    let bson_bytes = encoded.bytes;
+    let started = Instant::now();
+    let bson_doc =
+        document::load(bson_bytes.clone(), LoadOptions::default()).expect("bson must parse");
+    let bson_parse = started.elapsed();
+    println!(
+        "bson parse    {:>7.2} MB/s  in {}  -> {} nodes",
+        throughput(bson_bytes.len(), bson_parse),
+        show(bson_parse),
+        bson_doc.stats.node_count
+    );
+
+    let started = Instant::now();
+    let reencoded = bson_doc.save(&SaveOptions::default()).expect("bson must re-encode");
+    assert_eq!(reencoded.bytes, bson_bytes, "BSON round trip must be byte exact");
+    println!("bson round-trip {:>5}     verified in {}", "ok", show(started.elapsed()));
 }
 
-/// Build a JSON array of records with a realistic mix of value shapes.
+/// Build a JSON object holding an array of records with a realistic mix of
+/// value shapes. The object wrapper is deliberate: BSON has no top-level array,
+/// so a bare array fixture could not be measured on the BSON path.
 fn build_json(target_bytes: usize) -> String {
     let mut out = String::with_capacity(target_bytes + 4 * 1024 * 1024);
-    out.push('[');
+    out.push_str("{\"records\":[");
     let mut index = 0u64;
     while out.len() < target_bytes {
         if index > 0 {
@@ -159,11 +164,7 @@ fn build_json(target_bytes: usize) -> String {
             a = index * 7,
             b = index * 11,
         ));
-        let history_len = if index == 0 {
-            BIG_NESTED_ARRAY
-        } else {
-            index % 50
-        };
+        let history_len = if index == 0 { BIG_NESTED_ARRAY } else { index % 50 };
         for h in 0..history_len {
             if h > 0 {
                 out.push(',');
@@ -173,17 +174,19 @@ fn build_json(target_bytes: usize) -> String {
         out.push_str("]}");
         index += 1;
     }
-    out.push(']');
+    out.push_str("]}");
     out
 }
 
-/// The largest array below the root. The root is excluded because the fixture's
-/// root is the whole document, which the format measurements already cover.
+/// The largest array at least two levels below the root, standing in for "copy
+/// this subtree" in the UI. The top-level container is skipped because it holds
+/// every record, so measuring it would repeat the whole-document numbers.
 fn largest_nested_array(doc: &Doc) -> u32 {
     let root = doc.root();
     let mut best = root;
     let mut best_size = 0usize;
-    let mut work = doc.children(root).to_vec();
+    let mut work: Vec<u32> =
+        doc.children(root).iter().flat_map(|&child| doc.children(child).to_vec()).collect();
     while let Some(id) = work.pop() {
         let node = doc.node(id).expect("live node");
         if node.is_container() {

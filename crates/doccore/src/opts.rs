@@ -66,10 +66,7 @@ pub struct JsonOptions {
 
 impl JsonOptions {
     pub fn compact() -> Self {
-        JsonOptions {
-            indent: Indent::Compact,
-            ..Default::default()
-        }
+        JsonOptions { indent: Indent::Compact, ..Default::default() }
     }
 }
 
@@ -98,5 +95,23 @@ impl Default for LoadOptions {
             format: None,
             max_input_bytes: 512 * 1024 * 1024,
         }
+    }
+}
+
+/// How a document is written back out.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SaveOptions {
+    /// Override the document's own format, for save-as. `None` keeps it.
+    pub format: Option<Format>,
+    /// JSON formatting, used when the target format is JSON.
+    pub json: JsonOptions,
+    /// End text output with a newline, as POSIX text files do.
+    pub newline_terminated: bool,
+}
+
+impl Default for SaveOptions {
+    fn default() -> Self {
+        SaveOptions { format: None, json: JsonOptions::default(), newline_terminated: true }
     }
 }

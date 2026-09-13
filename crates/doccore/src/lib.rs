@@ -6,16 +6,24 @@
 //! interactive.
 
 pub mod arena;
+pub mod bson_read;
+pub mod bson_write;
 pub mod document;
 pub mod error;
 pub mod json_read;
 pub mod json_write;
+pub mod magic;
 pub mod numfmt;
 pub mod opts;
 
+#[cfg(test)]
+mod testutil;
+
 pub use arena::{Doc, Kind, Node, Span, Stats, MAX_DEPTH, NO_NODE};
+pub use document::{load, load_text, looks_like_json, Saved};
 pub use error::{Error, Result};
-pub use opts::{Flavor, Format, Indent, JsonOptions, LoadOptions};
+pub use magic::Framing;
+pub use opts::{Flavor, Format, Indent, JsonOptions, LoadOptions, SaveOptions};
 
 /// Version of the core crate, surfaced in the UI diagnostics panel.
 pub fn version() -> &'static str {

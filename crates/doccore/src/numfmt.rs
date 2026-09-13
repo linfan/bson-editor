@@ -56,14 +56,10 @@ fn hex_digit(b: u8) -> Option<u8> {
 /// True when the text is nothing but hex digits (with an optional `0x`).
 pub fn looks_like_hex(text: &str) -> bool {
     let t = text.trim();
-    let t = t
-        .strip_prefix("0x")
-        .or_else(|| t.strip_prefix("0X"))
-        .unwrap_or(t);
+    let t = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")).unwrap_or(t);
     !t.is_empty()
         && t.len().is_multiple_of(2)
-        && t.bytes()
-            .all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f' | b'A'..=b'F'))
+        && t.bytes().all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f' | b'A'..=b'F'))
 }
 
 // --------------------------------------------------------------- base64
@@ -154,15 +150,7 @@ pub fn iso8601(millis: i64) -> String {
     if y < 0 {
         out.push('-');
     }
-    out.push_str(&format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
-        y.abs(),
-        mo,
-        d,
-        h,
-        m,
-        s
-    ));
+    out.push_str(&format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}", y.abs(), mo, d, h, m, s));
     if ms != 0 {
         out.push_str(&format!(".{:03}", ms));
     }
@@ -260,11 +248,7 @@ pub fn decimal128_to_string(lo: u64, hi: u64) -> String {
         return "NaN".to_string();
     }
     if combination == 0x1E {
-        return if negative {
-            "-Infinity".to_string()
-        } else {
-            "Infinity".to_string()
-        };
+        return if negative { "-Infinity".to_string() } else { "Infinity".to_string() };
     }
 
     let (biased, significand) = if combination >= 0x18 {
@@ -276,11 +260,7 @@ pub fn decimal128_to_string(lo: u64, hi: u64) -> String {
         let sig = (((hi & 0x0001_FFFF_FFFF_FFFF) as u128) << 64) | lo as u128;
         (((hi >> 49) & 0x3FFF) as i32, sig)
     };
-    let significand = if significand >= DECIMAL128_MAX_SIGNIFICAND {
-        0
-    } else {
-        significand
-    };
+    let significand = if significand >= DECIMAL128_MAX_SIGNIFICAND { 0 } else { significand };
     format_decimal(negative, significand, biased - DECIMAL128_BIAS)
 }
 
@@ -349,11 +329,7 @@ pub fn decimal128_from_str(text: &str) -> Option<(u64, u64)> {
         Some((a, b)) => (a, b),
         None => (mantissa, ""),
     };
-    if !int_part
-        .bytes()
-        .chain(frac_part.bytes())
-        .all(|b| b.is_ascii_digit())
-    {
+    if !int_part.bytes().chain(frac_part.bytes()).all(|b| b.is_ascii_digit()) {
         return None;
     }
     let mut digits: String = format!("{}{}", int_part, frac_part);
@@ -397,14 +373,8 @@ mod tests {
     #[test]
     fn hex_round_trips() {
         assert_eq!(hex_encode(&[0x00, 0x0f, 0xa5, 0xff]), "000fa5ff");
-        assert_eq!(
-            hex_decode("000fa5ff").unwrap(),
-            vec![0x00, 0x0f, 0xa5, 0xff]
-        );
-        assert_eq!(
-            hex_decode("0x000fa5ff").unwrap(),
-            vec![0x00, 0x0f, 0xa5, 0xff]
-        );
+        assert_eq!(hex_decode("000fa5ff").unwrap(), vec![0x00, 0x0f, 0xa5, 0xff]);
+        assert_eq!(hex_decode("0x000fa5ff").unwrap(), vec![0x00, 0x0f, 0xa5, 0xff]);
         assert_eq!(hex_decode("abc"), None);
         assert_eq!(hex_decode("zz"), None);
     }
@@ -421,11 +391,7 @@ mod tests {
             ("foobar", "Zm9vYmFy"),
         ] {
             assert_eq!(base64_encode(text.as_bytes()), encoded, "encode {text:?}");
-            assert_eq!(
-                base64_decode(encoded).unwrap(),
-                text.as_bytes(),
-                "decode {encoded:?}"
-            );
+            assert_eq!(base64_decode(encoded).unwrap(), text.as_bytes(), "decode {encoded:?}");
         }
         assert_eq!(base64_decode("!!!!"), None);
     }
@@ -447,21 +413,11 @@ mod tests {
 
     #[test]
     fn iso8601_round_trips_through_the_parser() {
-        for millis in [
-            0i64,
-            1,
-            -1,
-            1_700_000_000_123,
-            -86_400_000,
-            9_999_999_999_999,
-        ] {
+        for millis in [0i64, 1, -1, 1_700_000_000_123, -86_400_000, 9_999_999_999_999] {
             let text = iso8601(millis);
             assert_eq!(parse_iso8601(&text), Some(millis), "{text}");
         }
-        assert_eq!(
-            parse_iso8601("2023-11-14T22:13:20.123+02:00"),
-            Some(1_699_992_800_123)
-        );
+        assert_eq!(parse_iso8601("2023-11-14T22:13:20.123+02:00"), Some(1_699_992_800_123));
         assert_eq!(parse_iso8601("1700000000123"), Some(1_700_000_000_123));
         assert_eq!(parse_iso8601("not a date"), None);
     }
@@ -481,11 +437,7 @@ mod tests {
             (0, 0x7C00_0000_0000_0000, "NaN"),
         ];
         for &(lo, hi, expected) in cases {
-            assert_eq!(
-                decimal128_to_string(lo, hi),
-                expected,
-                "lo={lo:#x} hi={hi:#x}"
-            );
+            assert_eq!(decimal128_to_string(lo, hi), expected, "lo={lo:#x} hi={hi:#x}");
         }
         // The encoder must agree with the decoder on every one of these.
         for &(lo, hi, expected) in cases {
@@ -539,10 +491,7 @@ mod tests {
         assert_eq!(decimal128_from_str("abc"), None);
         assert_eq!(decimal128_from_str("1.2.3"), None);
         // 35 significant digits cannot be stored exactly.
-        assert_eq!(
-            decimal128_from_str("12345678901234567890123456789012345"),
-            None
-        );
+        assert_eq!(decimal128_from_str("12345678901234567890123456789012345"), None);
         // 35 digits that collapse to 34 once trailing zeros are removed can.
         assert!(decimal128_from_str("12345678901234567890123456789012340").is_some());
         assert_eq!(decimal128_from_str("1e9999"), None);
