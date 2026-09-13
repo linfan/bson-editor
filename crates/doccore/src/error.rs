@@ -26,6 +26,11 @@ pub enum Error {
     #[error("cannot serialize: {0}")]
     Serialize(String),
 
+    /// The document is in a state that makes the operation unsafe, such as
+    /// re-parsing it while edits are still unsaved.
+    #[error("{0}")]
+    Conflict(String),
+
     #[error("document nesting is deeper than the supported limit of {0}")]
     TooDeep(u32),
 

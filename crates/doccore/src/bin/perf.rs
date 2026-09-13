@@ -24,9 +24,13 @@ fn main() {
     let fixture = build_json(target);
     println!("fixture       {:>7.2} MB  built in {}", mb(fixture.len()), show(started.elapsed()));
 
+    // Parse with expansion off, then expand separately, so the cost of
+    // requirement 2 shows up on its own line instead of hiding inside the parse
+    // number.
+    let parse_opts = LoadOptions { expand_json_depth: 0, ..Default::default() };
     let started = Instant::now();
-    let doc = document::load(fixture.as_bytes().to_vec(), LoadOptions::default())
-        .expect("fixture must parse");
+    let mut doc =
+        document::load(fixture.as_bytes().to_vec(), parse_opts).expect("fixture must parse");
     let parse = started.elapsed();
     println!(
         "parse         {:>7.2} MB/s  in {}  -> {} nodes, depth {}",
@@ -35,6 +39,18 @@ fn main() {
         doc.stats.node_count,
         doc.stats.max_depth
     );
+
+    let started = Instant::now();
+    let expansion = doc.expand_embedded_json(LoadOptions::default().expand_json_depth);
+    let expand_t = started.elapsed();
+    println!(
+        "expand        {:>7} overlays  in {}  -> {} strings scanned, +{} nodes",
+        expansion.overlays_created,
+        show(expand_t),
+        expansion.strings_examined,
+        expansion.nodes_added
+    );
+
     println!(
         "arena         {:>7.2} MB  ({} nodes x 64 B, {:.2} MB blob, {} child slots)",
         mb(doc.stats.heap_bytes - doc.stats.source_bytes),
@@ -153,8 +169,24 @@ fn build_json(target_bytes: usize) -> String {
         if index > 0 {
             out.push(',');
         }
+        // Requirement 2 at scale: a JSON object stored as a string, plus one
+        // nested two levels deep. Built with serde_json because hand-writing
+        // the escaping for a string inside a string is how bugs hide. Both
+        // results are already quoted JSON string literals.
+        let payload = serde_json::json!({
+            "kind": "event",
+            "n": index,
+            "tags": ["a", "b"],
+            "meta": { "ok": true },
+        })
+        .to_string();
+        let wrapped =
+            serde_json::json!({ "lvl": serde_json::json!({ "deep": index }).to_string() })
+                .to_string();
+        let payload = serde_json::to_string(&payload).unwrap();
+        let nested = serde_json::to_string(&wrapped).unwrap();
         out.push_str(&format!(
-            r#"{{"id":{index},"name":"user-{index}\ttabbed","email":"user{index}@example.com","score":{score:.6},"active":{active},"tags":["alpha","beta","gamma-{index}"],"balance":null,"created":"2024-0{month}-1{day}T12:34:56Z","meta":{{"level":{level},"flags":[true,false,true],"nested":{{"deep":{{"deeper":[{index},{a},{b}]}}}}}},"history":["#,
+            r#"{{"id":{index},"name":"user-{index}\ttabbed","email":"user{index}@example.com","score":{score:.6},"active":{active},"tags":["alpha","beta","gamma-{index}"],"balance":null,"created":"2024-0{month}-1{day}T12:34:56Z","meta":{{"level":{level},"flags":[true,false,true],"nested":{{"deep":{{"deeper":[{index},{a},{b}]}}}}}},"payload":{payload},"nested":{nested},"history":["#,
             index = index,
             score = (index as f64) * 0.0001234,
             active = index.is_multiple_of(2),
@@ -163,6 +195,8 @@ fn build_json(target_bytes: usize) -> String {
             level = index % 5,
             a = index * 7,
             b = index * 11,
+            payload = payload,
+            nested = nested,
         ));
         let history_len = if index == 0 { BIG_NESTED_ARRAY } else { index % 50 };
         for h in 0..history_len {

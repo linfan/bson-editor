@@ -164,8 +164,9 @@ pub struct Node {
     /// Multi-purpose discriminator:
     /// * [`Kind::Bool`] — `1` for true, `0` for false.
     /// * [`Kind::Binary`] — the BSON binary subtype.
-    /// * [`Kind::Str`] with an overlay — how many levels of JSON-string
-    ///   unwrapping sit below this node.
+    /// * [`Kind::Str`] with an overlay — how deeply nested the embedded JSON
+    ///   is: `1` for a string in the document itself, `2` for a string found
+    ///   inside a first-level overlay, and so on. Shown as a badge in the tree.
     pub sub: u8,
     /// Bit flags, see [`Node::OVERLAY_DIRTY`].
     pub flags: u8,
@@ -280,6 +281,9 @@ pub struct Doc {
     pub(crate) source: Vec<u8>,
     /// True when the root is a synthetic array wrapping several BSON documents.
     pub synthetic_root: bool,
+    /// How many levels of embedded JSON the current overlays were built with.
+    /// Requirement 2.
+    pub expand_depth: u8,
     pub document_count: usize,
     pub stats: Stats,
     pub warnings: Vec<String>,
@@ -305,6 +309,7 @@ impl Doc {
             trailing: Vec::new(),
             source: Vec::new(),
             synthetic_root: false,
+            expand_depth: 0,
             document_count: 0,
             stats: Stats::default(),
             warnings: Vec::new(),

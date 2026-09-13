@@ -5,6 +5,7 @@ use crate::arena::{Doc, Kind, Span};
 use crate::bson_read;
 use crate::bson_write;
 use crate::error::{Error, Result};
+use crate::expand::{self, Expansion};
 use crate::json_read::parse_json;
 use crate::json_write::{to_json_string, write_json};
 use crate::magic;
@@ -105,6 +106,40 @@ impl Doc {
             }
         }
     }
+
+    /// Unfold embedded JSON strings (requirement 2) and refresh the statistics
+    /// that count the result.
+    ///
+    /// This only ever adds overlays, so it can deepen an already-expanded
+    /// document in place but cannot fold one back up. Lowering the depth needs
+    /// [`Doc::set_expand_depth`], which rebuilds from the original bytes.
+    pub fn expand_embedded_json(&mut self, depth: u8) -> Expansion {
+        let report = expand::expand(self, depth);
+        self.expand_depth = depth;
+        self.refresh_stats();
+        report
+    }
+
+    /// Rebuild the document with a different embedded-JSON expand depth.
+    ///
+    /// The overlays come from re-parsing the original bytes, so this is refused
+    /// while there are unsaved edits: it would quietly throw all of them away.
+    pub fn set_expand_depth(&mut self, depth: u8, opts: &LoadOptions) -> Result<Expansion> {
+        if self.dirty {
+            return Err(Error::Conflict(
+                "save or discard your edits before changing the expand depth".into(),
+            ));
+        }
+        if depth == self.expand_depth {
+            return Ok(Expansion::default());
+        }
+        let source = std::mem::take(&mut self.source);
+        let path = self.path.take();
+        let mut rebuilt = load_raw(source, opts)?;
+        rebuilt.path = path;
+        *self = rebuilt;
+        Ok(self.expand_embedded_json(depth))
+    }
 }
 
 /// Cheap heuristic: does this look like JSON text?
@@ -120,6 +155,13 @@ pub fn looks_like_json(bytes: &[u8]) -> bool {
 /// Load a document from raw bytes, honoring the magic-byte and expand-depth
 /// options.
 pub fn load(source: Vec<u8>, opts: LoadOptions) -> Result<Doc> {
+    let mut doc = load_raw(source, &opts)?;
+    doc.expand_embedded_json(opts.expand_json_depth);
+    Ok(doc)
+}
+
+/// Parse without running embedded-JSON expansion.
+fn load_raw(source: Vec<u8>, opts: &LoadOptions) -> Result<Doc> {
     if source.is_empty() {
         return Err(Error::Empty);
     }
@@ -220,6 +262,66 @@ mod tests {
         let text = r#"{"a":1,"b":[true,null,"x"],"c":{"d":2.5}}"#;
         let doc = load(text.as_bytes().to_vec(), LoadOptions::default()).unwrap();
         assert_eq!(doc.to_json(doc.root(), &JsonOptions::compact()).unwrap(), text);
+    }
+
+    /// `{"demo":"{\"level1\":\"{\\\"level2\\\":\\\"value\\\"}\"}"}` — the nested
+    /// shape from requirement 2.
+    fn nested_json_text() -> String {
+        r#"{"demo":"{\"level1\":\"{\\\"level2\\\":\\\"value\\\"}\"}"}"#.to_string()
+    }
+
+    #[test]
+    fn loading_unfolds_nested_json_strings_to_the_configured_depth() {
+        let doc = load(nested_json_text().into_bytes(), LoadOptions::default()).unwrap();
+        assert_eq!(doc.expand_depth, 3);
+        assert_eq!(doc.stats.overlay_nodes, 2, "both embedded objects unfold");
+
+        let demo = doc.children(doc.root())[0];
+        let level1 = doc.children(doc.presented(demo))[0];
+        assert!(doc.node_at(level1).has_overlay());
+        assert_eq!(doc.key_of(doc.children(doc.presented(level1))[0]), "level2");
+    }
+
+    #[test]
+    fn a_depth_of_zero_leaves_embedded_json_folded() {
+        let opts = LoadOptions { expand_json_depth: 0, ..Default::default() };
+        let doc = load(nested_json_text().into_bytes(), opts).unwrap();
+        assert_eq!(doc.stats.overlay_nodes, 0);
+        let demo = doc.children(doc.root())[0];
+        assert_eq!(doc.presented(demo), demo, "nothing to present but the string itself");
+    }
+
+    #[test]
+    fn the_expand_depth_can_be_changed_after_loading() {
+        let mut doc = load(nested_json_text().into_bytes(), LoadOptions::default()).unwrap();
+        assert_eq!(doc.stats.overlay_nodes, 2);
+
+        let folded = doc.set_expand_depth(0, &LoadOptions::default()).unwrap();
+        assert_eq!(folded.overlays_created, 0);
+        assert_eq!(doc.stats.overlay_nodes, 0);
+        assert_eq!(doc.expand_depth, 0);
+
+        // Rebuilding comes from the retained source, so the ids change but the
+        // document itself is the same.
+        let unfolded = doc.set_expand_depth(1, &LoadOptions::default()).unwrap();
+        assert_eq!(unfolded.overlays_created, 1, "only the outer string at depth 1");
+        assert_eq!(doc.stats.overlay_nodes, 1);
+
+        let same = doc.set_expand_depth(1, &LoadOptions::default()).unwrap();
+        assert_eq!(same, Expansion::default(), "an unchanged depth must not rebuild");
+    }
+
+    #[test]
+    fn changing_the_expand_depth_is_refused_while_dirty() {
+        // The rebuild re-parses the original bytes, so allowing it here would
+        // silently discard the edit.
+        let mut doc = load(nested_json_text().into_bytes(), LoadOptions::default()).unwrap();
+        doc.dirty = true;
+        assert!(matches!(
+            doc.set_expand_depth(0, &LoadOptions::default()),
+            Err(Error::Conflict(_))
+        ));
+        assert_eq!(doc.stats.overlay_nodes, 2, "the document is left as it was");
     }
 
     #[test]
