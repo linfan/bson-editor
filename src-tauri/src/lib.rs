@@ -1,13 +1,40 @@
-#[tauri::command]
-fn core_version() -> String {
-    doccore::version().to_string()
-}
+//! Tauri shell: owns the open document and exposes it to the webview as a set
+//! of narrow commands.
+//!
+//! All the heavy lifting lives in `doccore`. This crate only translates between
+//! the arena and the wire types the React tree consumes, which is why the tree
+//! can page through a two-million-node document without the webview ever
+//! holding more than a few hundred rows.
+
+mod commands;
+mod dto;
+
+pub use commands::Store;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![core_version])
+        .manage(Store::default())
+        .invoke_handler(tauri::generate_handler![
+            commands::core_version,
+            commands::open_file,
+            commands::load_text,
+            commands::doc_info,
+            commands::children,
+            commands::node_value,
+            commands::copy_subtree,
+            commands::set_node_value,
+            commands::rename_node,
+            commands::insert_node,
+            commands::paste_json,
+            commands::replace_node,
+            commands::remove_node,
+            commands::reexpand,
+            commands::set_expand_depth,
+            commands::save_file,
+            commands::export_text
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

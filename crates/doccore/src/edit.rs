@@ -37,6 +37,26 @@ pub enum Value {
     Array,
 }
 
+/// Can a node of this kind be rewritten through [`Value`]?
+///
+/// Must stay in step with [`value_of`], which reports [`Error::Unsupported`]
+/// for exactly the kinds this rejects. The tree renderer asks this per row, so
+/// it is a kind check rather than a `value_of` call that would copy the string.
+pub fn can_edit(kind: Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Null
+            | Kind::Bool
+            | Kind::Int32
+            | Kind::Int64
+            | Kind::UInt64
+            | Kind::Double
+            | Kind::Str
+            | Kind::Object
+            | Kind::Array
+    )
+}
+
 /// Read a node's value back in the form the editor writes it, for prefilling an
 /// edit field.
 pub fn value_of(doc: &Doc, id: u32) -> Result<Value> {
