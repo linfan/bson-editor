@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = ["crates/doccore", "src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Fan Lin"]
+
+[workspace.dependencies]
+doccore = { path = "crates/doccore" }
+itoa = "1"
+ryu = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+# `opt-level = 1` keeps debug builds of the parser usable on 10MB inputs while
+# still compiling Tauri's dependency tree quickly.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package.doccore]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
