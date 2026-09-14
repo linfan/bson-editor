@@ -20,6 +20,11 @@ cargo build -p bson-editor  # just the binary
 The last form opens straight into the document: the file is parsed during startup, before
 the window exists, and the webview picks it up on mount.
 
+`pnpm tauri build` produces the `.app` and then a `.dmg`. Making the disk image drives
+Finder through AppleScript, so it needs Automation permission; a shell without it fails
+with `-1743` after the `.app` is already built. `pnpm tauri build --bundles app` stops
+before that step.
+
 | Script | What it does |
 | --- | --- |
 | `pnpm dev` | Vite dev server on its own, no Tauri shell |
