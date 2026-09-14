@@ -28,6 +28,7 @@ pub enum Value {
     Null,
     Bool(bool),
     Int(i64),
+    #[serde(rename = "uint")]
     UInt(u64),
     Double(f64),
     Str(String),
