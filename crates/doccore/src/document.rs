@@ -220,6 +220,7 @@ pub fn load_text(text: &str, opts: LoadOptions) -> Result<Doc> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::edit;
     use crate::testutil::{bson, i32, string};
 
     fn sample_bson() -> Vec<u8> {
@@ -371,6 +372,36 @@ mod tests {
 
         let saved = doc.save(&SaveOptions::default()).unwrap();
         assert_eq!(saved.bytes, bytes, "saving restores the prefix byte for byte");
+    }
+
+    #[test]
+    fn an_edited_document_is_saved_back_inside_its_magic_framing() {
+        let mut bytes = b"\xDE\xAD\xBE\xEF".to_vec();
+        bytes.extend_from_slice(&sample_bson());
+        bytes.extend_from_slice(b"\x00\x01trailer");
+        let original_len = bytes.len();
+
+        let mut doc = load(bytes, LoadOptions::default()).unwrap();
+        let name = doc.children(doc.root())[1];
+        // A longer string changes the body's size, so the framing has to be
+        // rebuilt around it rather than replayed from the original offsets.
+        let longer = "a much longer name than the original";
+        edit::set_value(&mut doc, name, edit::Value::Str(longer.into())).unwrap();
+
+        let saved = doc.save(&SaveOptions::default()).unwrap();
+        assert!(saved.bytes.starts_with(b"\xDE\xAD\xBE\xEF"), "prefix must come back");
+        assert!(saved.bytes.ends_with(b"\x00\x01trailer"), "trailer must come back");
+        assert_ne!(saved.bytes.len(), original_len, "the edit should have changed the body size");
+
+        let reopened = load(saved.bytes, LoadOptions::default()).unwrap();
+        assert_eq!(reopened.magic, b"\xDE\xAD\xBE\xEF");
+        let renamed = reopened.children(reopened.root())[1];
+        assert_eq!(reopened.key_of(renamed), "name");
+        assert_eq!(
+            edit::value_of(&reopened, renamed).unwrap(),
+            edit::Value::Str(longer.into()),
+            "the edit must survive the round trip"
+        );
     }
 
     #[test]
