@@ -93,11 +93,20 @@ export function Toolbar({
   );
 }
 
-export function StatusBar({ info }: { info: DocInfo | null }) {
+export function StatusBar({
+  info,
+  version,
+}: {
+  info: DocInfo | null;
+  version: string | null;
+}) {
+  const engine = version ? <span className="muted">doccore v{version}</span> : null;
   if (!info) {
     return (
       <div className="statusbar">
         <span className="muted">No document open</span>
+        <div className="spacer" />
+        {engine}
       </div>
     );
   }
@@ -118,6 +127,7 @@ export function StatusBar({ info }: { info: DocInfo | null }) {
           {info.warnings.length} warning{info.warnings.length === 1 ? "" : "s"}
         </span>
       )}
+      {engine}
     </div>
   );
 }

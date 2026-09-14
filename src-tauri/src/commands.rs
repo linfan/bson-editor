@@ -10,7 +10,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
 
 use doccore::edit::{self, Value};
-use doccore::opts::{Format, JsonOptions, SaveOptions};
+use doccore::opts::{Format, JsonOptions, LoadOptions, SaveOptions};
 use doccore::{document, Doc, Saved};
 use tauri::State;
 
@@ -66,6 +66,31 @@ fn install(
     let mut guard = lock(state)?;
     *guard = Some(Session { doc, opts: options.load(), load_ms });
     Ok(info)
+}
+
+/// Load a file straight into the store, for the `bson-editor <path>` form.
+///
+/// This runs during setup, before there is a webview to answer, so a failure is
+/// reported on stderr and the app simply opens empty.
+pub fn open_into(store: &Store, path: &str) {
+    let started = Instant::now();
+    let opts = LoadOptions::default();
+    let loaded = fs::read(path)
+        .map_err(doccore::Error::from)
+        .and_then(|bytes| document::load(bytes, opts))
+        .map(|mut doc| {
+            doc.path = Some(path.to_string());
+            doc
+        });
+    match loaded {
+        Ok(doc) => {
+            let load_ms = millis(started);
+            if let Ok(mut guard) = store.0.lock() {
+                *guard = Some(Session { doc, opts, load_ms });
+            }
+        }
+        Err(err) => eprintln!("could not open {path}: {err}"),
+    }
 }
 
 /// Bytes ready to write, plus where they go. Split out so the disk write happens

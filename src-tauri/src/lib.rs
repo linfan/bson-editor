@@ -9,6 +9,8 @@
 mod commands;
 mod dto;
 
+use tauri::Manager;
+
 pub use commands::Store;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -16,6 +18,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Store::default())
+        .setup(|app| {
+            // `bson-editor <path>` opens straight into the document, which is
+            // what a viewer is for.
+            if let Some(path) = std::env::args().nth(1) {
+                commands::open_into(app.state::<Store>().inner(), &path);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::core_version,
             commands::open_file,

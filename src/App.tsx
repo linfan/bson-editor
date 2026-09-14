@@ -47,6 +47,7 @@ export default function App() {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [version, setVersion] = useState<string | null>(null);
 
   const tree = useTree(info?.root ?? null, generation);
 
@@ -77,6 +78,14 @@ export default function App() {
     setSelected(null);
     setGeneration((current) => current + 1);
   }, []);
+
+  // `bson-editor <path>` loads a document during setup, before this webview
+  // exists, so ask whether one is already there. Rejecting is the ordinary
+  // "nothing open" case and is ignored on purpose.
+  useEffect(() => {
+    api.docInfo().then(adopt).catch(() => undefined);
+    api.coreVersion().then(setVersion).catch(() => setVersion(null));
+  }, [adopt]);
 
   const toClipboard = useCallback(
     async (text: string, label: string) => {
@@ -308,7 +317,7 @@ export default function App() {
         <EmptyState onOpen={() => void onOpen()} onPaste={() => setDialog({ kind: "paste" })} />
       )}
 
-      <StatusBar info={info} />
+      <StatusBar info={info} version={version} />
 
       {(notice || failure || tree.error) && (
         <div className="toast-wrap">
