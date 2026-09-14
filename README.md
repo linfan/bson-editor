@@ -28,7 +28,7 @@ the window exists, and the webview picks it up on mount.
 | `pnpm test:core` | The engine's Rust test suite |
 | `pnpm perf [mb]` | The performance harness, on a synthetic document of that many megabytes |
 
-`cargo test --workspace` runs everything: 133 tests across the engine and the IPC layer.
+`cargo test --workspace` runs everything: 135 tests across the engine and the IPC layer.
 
 ## What it does
 
@@ -113,7 +113,9 @@ goes into a caller-supplied byte buffer with `itoa` and `ryu` for numbers.
 The IPC surface is paged rather than streaming, and the frontend keeps a `generation`
 counter that invalidates cached pages whenever the document is rebuilt from its original
 bytes — which is the one kind of change that can hand back the same root id for entirely
-different nodes.
+different nodes. The interfaces in `src/api.ts` mirror the Rust wire types by hand, so a
+test pins every field name they emit: a rename would otherwise arrive in the webview as
+`undefined` rather than failing to build.
 
 ## Known limits
 

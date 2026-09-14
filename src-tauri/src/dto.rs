@@ -431,4 +431,91 @@ mod tests {
         let err = page_children(&doc, 4242, 0, 10).unwrap_err();
         assert_eq!(err.kind, "noNode");
     }
+
+    /// The interfaces in `src/api.ts` are hand-written mirrors of these structs.
+    /// A renamed field does not fail to compile — it arrives in the webview as
+    /// `undefined` and the row quietly loses a badge, so the names are pinned.
+    #[test]
+    fn the_wire_shapes_are_what_the_frontend_declares() {
+        /// Sorted key list of a serialized struct, for a stable comparison.
+        fn shape<T: Serialize>(value: &T) -> String {
+            let json = serde_json::to_value(value).unwrap();
+            let mut keys: Vec<&str> = json
+                .as_object()
+                .expect("a struct serializes to an object")
+                .keys()
+                .map(String::as_str)
+                .collect();
+            keys.sort_unstable();
+            keys.join(",")
+        }
+
+        let doc = loaded(r#"{"a":[1,2]}"#);
+        let info = DocInfo::of(&doc, 1.5);
+        assert_eq!(
+            shape(&info),
+            "dirty,expandDepth,format,loadMs,magic,path,root,stats,syntheticRoot,\
+             trailingBytes,warnings"
+        );
+        assert_eq!(
+            shape(&doc.stats),
+            "blobBytes,childSlots,containerCount,documentCount,heapBytes,magicBytes,maxDepth,\
+             nodeCount,overlayNodes,sourceBytes,trailingBytes"
+        );
+
+        let page = page_children(&doc, doc.root(), 0, 10).unwrap();
+        assert_eq!(shape(&page), "offset,parent,rows,total");
+        assert_eq!(
+            shape(&page.rows[0]),
+            "childCount,editable,embeddedJson,expandable,id,index,key,kind,overlayLevel,preview"
+        );
+
+        assert_eq!(shape(&EditResult { node: 1, info: DocInfo::of(&doc, 0.0) }), "info,node");
+        assert_eq!(
+            shape(&SaveResult {
+                path: "x.json".into(),
+                bytes_written: 1,
+                format: Format::Json,
+                warnings: Vec::new()
+            }),
+            "bytesWritten,format,path,warnings"
+        );
+        assert_eq!(shape(&ApiError::no_document()), "kind,message");
+
+        // The frontend switches on these two literals to pick a file extension.
+        assert_eq!(serde_json::to_value(Format::Json).unwrap(), "json");
+        assert_eq!(serde_json::to_value(Format::Bson).unwrap(), "bson");
+        assert_eq!(serde_json::to_value(info).unwrap()["format"], "json");
+        let bson = load_bson(bson_doc(&[("n", 0x10, 1i32.to_le_bytes().to_vec())]));
+        assert_eq!(serde_json::to_value(DocInfo::of(&bson, 0.0)).unwrap()["format"], "bson");
+    }
+
+    /// The inbound half of the contract: what the webview sends has to survive
+    /// serde too, including the `uint` tag, which camelCase would otherwise
+    /// spell `uInt`.
+    #[test]
+    fn the_frontend_can_address_every_editable_value_type() {
+        use doccore::edit::Value;
+        let cases = [
+            (r#"{"type":"null"}"#, Value::Null),
+            (r#"{"type":"bool","value":true}"#, Value::Bool(true)),
+            (r#"{"type":"int","value":-5}"#, Value::Int(-5)),
+            (r#"{"type":"uint","value":18446744073709551615}"#, Value::UInt(u64::MAX)),
+            (r#"{"type":"double","value":1.5}"#, Value::Double(1.5)),
+            (r#"{"type":"str","value":"x"}"#, Value::Str("x".into())),
+            (r#"{"type":"object"}"#, Value::Object),
+            (r#"{"type":"array"}"#, Value::Array),
+        ];
+        for (json, want) in cases {
+            assert_eq!(serde_json::from_str::<Value>(json).unwrap(), want, "{json}");
+        }
+
+        // Every field of the open options is optional, so the frontend may send
+        // a partial object or none at all.
+        let partial: OpenOptions = serde_json::from_str(r#"{"expandJsonDepth":7}"#).unwrap();
+        assert_eq!(partial.expand_json_depth, 7);
+        assert_eq!(partial.load().expand_json_depth, 7);
+        let empty: OpenOptions = serde_json::from_str("{}").unwrap();
+        assert_eq!(empty.expand_json_depth, LoadOptions::default().expand_json_depth);
+    }
 }
