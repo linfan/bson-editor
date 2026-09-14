@@ -42,7 +42,13 @@ export function TreeView({ tree, actions, selected, onSelect }: Props) {
   }, []);
 
   const total = tree.rows.length;
-  const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+  // The scroll offset is state, so it can outlive the rows it referred to:
+  // collapsing a subtree or adopting a smaller document shrinks the canvas, and
+  // the browser clamps the element without firing a scroll event. Clamping the
+  // row index keeps the window inside the list instead of painting nothing.
+  const lastRow = Math.max(0, total - 1);
+  const scrollRow = Math.min(Math.floor(scrollTop / ROW_HEIGHT), lastRow);
+  const start = Math.max(0, scrollRow - OVERSCAN);
   const end = Math.min(total, start + Math.ceil(viewport / ROW_HEIGHT) + OVERSCAN * 2);
   const { rows } = tree;
 
