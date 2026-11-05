@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openFileDialog, save as saveFileDialog } from "@tauri-apps/plugin-dialog";
 import * as api from "./api";
 import type { DocInfo, JsonOptions, NodeRow, SaveOptions, TabInfo, Value } from "./api";
-import { EmptyState, StatusBar, TabBar, Toolbar } from "./components/Chrome";
+import { EmptyState, FindBar, StatusBar, TabBar, Toolbar } from "./components/Chrome";
 import { ConfirmDialog, NodeDialog, PasteDialog } from "./components/Dialogs";
 import type { NodeSubmission } from "./components/Dialogs";
 import { TreeView } from "./components/TreeView";
@@ -43,6 +43,8 @@ interface Tab {
   /** Last depth the user asked for; the document reports its own after a load. */
   depth: number;
   selected: number | null;
+  /** A search result to scroll to; the token makes repeated hits distinct. */
+  scroll: { node: number; token: number } | null;
 }
 
 type Dialog =
@@ -67,10 +69,17 @@ export default function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [version, setVersion] = useState<string | null>(null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<api.SearchResults>({ matches: [], truncated: false });
+  const [matchIndex, setMatchIndex] = useState(0);
+  const [searching, setSearching] = useState(false);
+  const [findFocus, setFindFocus] = useState(0);
 
   // The tree hook lives inside each tab panel, so its object is parked here for
   // the event handlers that need to refresh the active tab.
   const trees = useRef(new Map<number, Tree>());
+  const scrollToken = useRef(0);
 
   const active = tabs.find((tab) => tab.id === activeId) ?? null;
 
@@ -126,6 +135,7 @@ export default function App() {
         generation: 0,
         depth: opened.info.expandDepth,
         selected: null,
+        scroll: null,
       },
     ]);
     setActiveId(opened.tab);
@@ -146,6 +156,7 @@ export default function App() {
             generation: 0,
             depth: item.info.expandDepth,
             selected: null,
+            scroll: null,
           })),
         );
         setActiveId(open[0].tab);
@@ -387,9 +398,89 @@ export default function App() {
     [doClose, tabs],
   );
 
-  // Cmd/Ctrl+O and Cmd/Ctrl+S, which a desktop app is expected to honour.
+  /** Open the ancestors of a match, then select it and scroll its row into view. */
+  const goToMatch = useCallback(
+    async (tabId: number, matches: api.SearchMatch[], index: number) => {
+      const match = matches[index];
+      if (!match) return;
+      setMatchIndex(index);
+      await trees.current.get(tabId)?.reveal(match.path);
+      scrollToken.current += 1;
+      const token = scrollToken.current;
+      setTabs((prev) =>
+        prev.map((item) =>
+          item.id === tabId
+            ? { ...item, selected: match.node, scroll: { node: match.node, token } }
+            : item,
+        ),
+      );
+    },
+    [],
+  );
+
+  // Results belong to one tab; drop them the moment the tab changes.
+  useEffect(() => {
+    setResults({ matches: [], truncated: false });
+    setMatchIndex(0);
+  }, [activeId]);
+
+  useEffect(() => {
+    if (!findOpen) {
+      setResults({ matches: [], truncated: false });
+      setMatchIndex(0);
+    }
+  }, [findOpen]);
+
+  // Debounced search. Each keystroke restarts the timer, so typing does not
+  // queue a walk of the whole document per character.
+  useEffect(() => {
+    if (!findOpen || activeId === null) return;
+    const needle = query.trim();
+    if (needle.length === 0) {
+      setResults({ matches: [], truncated: false });
+      setMatchIndex(0);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const timer = setTimeout(() => {
+      api
+        .search(activeId, needle, 500)
+        .then((found) => {
+          if (cancelled) return;
+          setResults(found);
+          setMatchIndex(0);
+          if (found.matches.length > 0) void goToMatch(activeId, found.matches, 0);
+        })
+        .catch(fail)
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, 180);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [active?.generation, activeId, fail, findOpen, goToMatch, query]);
+
+  const stepMatch = useCallback(
+    (delta: number) => {
+      if (activeId === null || results.matches.length === 0) return;
+      const next =
+        (matchIndex + delta + results.matches.length) % results.matches.length;
+      void goToMatch(activeId, results.matches, next);
+    },
+    [activeId, goToMatch, matchIndex, results.matches],
+  );
+
+  // Cmd/Ctrl+O, S and F, which a desktop app is expected to honour.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && findOpen) {
+        setFindOpen(false);
+        return;
+      }
       if (!(event.metaKey || event.ctrlKey)) return;
       const key = event.key.toLowerCase();
       if (key === "o") {
@@ -399,11 +490,15 @@ export default function App() {
         event.preventDefault();
         const tab = tabs.find((item) => item.id === activeId);
         if (tab) void onSave(tab);
+      } else if (key === "f" && !dialog) {
+        event.preventDefault();
+        setFindOpen(true);
+        setFindFocus((value) => value + 1);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [activeId, onOpen, onSave, tabs]);
+  }, [activeId, dialog, findOpen, onOpen, onSave, tabs]);
 
   const actionsFor = (tabId: number) => ({
     onCopy: (row: NodeRow) => void onCopyRow(tabId, row),
@@ -435,6 +530,21 @@ export default function App() {
         onDepth={(next) => active && void onDepth(active, next)}
       />
 
+      {findOpen && active && (
+        <FindBar
+          query={query}
+          onQuery={setQuery}
+          count={results.matches.length}
+          current={matchIndex}
+          truncated={results.truncated}
+          busy={searching}
+          focusToken={findFocus}
+          onNext={() => stepMatch(1)}
+          onPrev={() => stepMatch(-1)}
+          onClose={() => setFindOpen(false)}
+        />
+      )}
+
       <div className="panes">
         {tabs.map((tab) => (
           <div key={tab.id} className={tab.id === activeId ? "pane" : "pane hidden"}>
@@ -442,6 +552,7 @@ export default function App() {
               tab={tab}
               trees={trees}
               actions={actionsFor(tab.id)}
+              scrollTo={tab.scroll}
               onSelect={(selected) =>
                 setTabs((prev) =>
                   prev.map((item) => (item.id === tab.id ? { ...item, selected } : item)),
@@ -519,6 +630,7 @@ function TabPanel({
   tab,
   trees,
   actions,
+  scrollTo,
   onSelect,
 }: {
   tab: Tab;
@@ -529,6 +641,7 @@ function TabPanel({
     onInsert: (row: NodeRow, parentId: number) => void;
     onDelete: (row: NodeRow, parentId: number) => void;
   };
+  scrollTo: { node: number; token: number } | null;
   onSelect: (id: number | null) => void;
 }) {
   const tree = useTree(tab.id, tab.info.root, tab.generation);
@@ -536,7 +649,13 @@ function TabPanel({
 
   return (
     <>
-      <TreeView tree={tree} actions={actions} selected={tab.selected} onSelect={onSelect} />
+      <TreeView
+        tree={tree}
+        actions={actions}
+        selected={tab.selected}
+        onSelect={onSelect}
+        scrollTo={scrollTo}
+      />
       {tree.error && (
         <div className="toast-wrap">
           <div className="toast error">

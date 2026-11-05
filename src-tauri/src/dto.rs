@@ -67,6 +67,35 @@ pub struct NodeRow {
     pub editable: bool,
 }
 
+/// One step of the path from the root to a match. The index is the node's
+/// position inside its parent, which is what the frontend needs to page a
+/// container far enough for the node to exist in the loaded rows.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchStep {
+    pub node: u32,
+    pub index: u32,
+}
+
+/// One hit from a full-document text search.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchMatch {
+    pub node: u32,
+    pub key: Option<String>,
+    pub preview: String,
+    /// Root down to the match, inclusive.
+    pub path: Vec<SearchStep>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResults {
+    pub matches: Vec<SearchMatch>,
+    /// True when the limit cut the walk short, so there are more matches.
+    pub truncated: bool,
+}
+
 /// A window onto one container's children.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -187,6 +216,92 @@ impl DocInfo {
             load_ms,
         }
     }
+}
+
+/// Search every key and value in the document, in document order.
+///
+/// The walk follows the presented tree, so a string that decoded into JSON is
+/// searched through its overlay rather than as an escaped literal. The query is
+/// matched case-insensitively as a substring; an empty query matches nothing.
+pub fn search(doc: &Doc, query: &str, limit: usize) -> SearchResults {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() || limit == 0 {
+        return SearchResults { matches: Vec::new(), truncated: false };
+    }
+
+    let mut matches = Vec::new();
+    let mut path = Vec::new();
+    walk(doc, doc.root(), 0, &needle, limit, &mut path, &mut matches);
+    let truncated = matches.len() >= limit;
+    SearchResults { matches, truncated }
+}
+
+/// Depth-first walk. Returns false once the limit is reached so the remaining
+/// siblings are skipped.
+fn walk(
+    doc: &Doc,
+    id: u32,
+    index: u32,
+    needle: &str,
+    limit: usize,
+    path: &mut Vec<SearchStep>,
+    out: &mut Vec<SearchMatch>,
+) -> bool {
+    // Overlays make the presented tree deeper than the raw nesting limit, so
+    // guard against a pathological chain rather than trusting the parser's cap.
+    if path.len() > 4_096 {
+        return true;
+    }
+    path.push(SearchStep { node: id, index });
+    let n = match doc.node(id) {
+        Ok(node) => *node,
+        Err(_) => {
+            path.pop();
+            return true;
+        }
+    };
+    if matches(doc, id, needle) {
+        out.push(SearchMatch {
+            node: id,
+            key: if n.key.is_none() { None } else { Some(doc.key_of(id).into_owned()) },
+            preview: preview(doc, &n),
+            path: path.clone(),
+        });
+        if out.len() >= limit {
+            path.pop();
+            return false;
+        }
+    }
+
+    for (i, &child) in doc.children(doc.presented(id)).iter().enumerate() {
+        if !walk(doc, child, i as u32, needle, limit, path, out) {
+            path.pop();
+            return false;
+        }
+    }
+    path.pop();
+    true
+}
+
+/// Does the node's name or value contain the needle? Containers match by name
+/// only; their summary text is not content.
+fn matches(doc: &Doc, id: u32, needle: &str) -> bool {
+    let Ok(n) = doc.node(id) else { return false };
+    if !n.key.is_none() && doc.key_of(id).to_lowercase().contains(needle) {
+        return true;
+    }
+    // A container's summary is not content, and an embedded-JSON string is
+    // searched through its overlay so one visible value is not reported twice.
+    if n.kind.is_container() || n.has_overlay() {
+        return false;
+    }
+    let text = match n.kind {
+        Kind::Str | Kind::Symbol | Kind::JavaScript | Kind::JavaScriptWithScope => {
+            doc.text(n.val).to_lowercase()
+        }
+        _ => preview(doc, n).to_lowercase(),
+    };
+    text.contains(needle)
 }
 
 /// Build one window of rows for `parent`.
@@ -356,6 +471,53 @@ mod tests {
         assert_eq!(inner.rows[0].index, 0);
     }
 
+    #[test]
+    fn search_matches_keys_and_values_in_document_order() {
+        let doc = loaded(r#"{"name":"alice","nested":{"NAME":"Bob"},"list":["alice",2]}"#);
+        let results = search(&doc, "Alice", 50);
+        assert_eq!(results.matches.len(), 2);
+        assert!(!results.truncated);
+        assert_eq!(results.matches[0].preview, "alice", "the first value comes first");
+        assert_eq!(results.matches[1].preview, "alice");
+        assert_eq!(results.matches[0].path.first().unwrap().node, doc.root());
+
+        // The last step's index must address the match inside its parent.
+        let last = &results.matches[1];
+        let parent = last.path[last.path.len() - 2].node;
+        let step = last.path.last().unwrap();
+        assert_eq!(doc.children(parent)[step.index as usize], last.node);
+    }
+
+    #[test]
+    fn search_matches_names_case_insensitively() {
+        let doc = loaded(r#"{"Alpha":1,"beta":{"GAMMA":2}}"#);
+        let results = search(&doc, "gamma", 10);
+        assert_eq!(results.matches.len(), 1);
+        assert_eq!(results.matches[0].key.as_deref(), Some("GAMMA"));
+        assert_eq!(results.matches[0].preview, "2");
+    }
+
+    #[test]
+    fn search_enters_embedded_json_overlays() {
+        let doc = loaded(r#"{"s":"{\"inner\":\"needle\"}"}"#);
+        let results = search(&doc, "needle", 10);
+        assert_eq!(results.matches.len(), 1);
+        assert_eq!(results.matches[0].key.as_deref(), Some("inner"));
+        assert_eq!(results.matches[0].path.len(), 3, "root, the string, then its overlay");
+    }
+
+    #[test]
+    fn search_stops_at_the_limit_and_reports_truncation() {
+        let doc = loaded(r#"["a","a","a"]"#);
+        let results = search(&doc, "a", 2);
+        assert_eq!(results.matches.len(), 2);
+        assert!(results.truncated);
+
+        let empty = search(&doc, "  ", 10);
+        assert!(empty.matches.is_empty());
+        assert!(!empty.truncated);
+    }
+
     /// Assemble a BSON document from `(name, type byte, payload)` triples. The
     /// wire order is type byte, key, NUL, payload.
     fn bson_doc(elements: &[(&str, u8, Vec<u8>)]) -> Vec<u8> {
@@ -475,6 +637,11 @@ mod tests {
             "blobBytes,childSlots,containerCount,documentCount,heapBytes,magicBytes,maxDepth,\
              nodeCount,overlayNodes,sourceBytes,trailingBytes"
         );
+
+        let found = search(&doc, "a", 10);
+        assert_eq!(shape(&found), "matches,truncated");
+        assert_eq!(shape(&found.matches[0]), "key,node,path,preview");
+        assert_eq!(shape(&found.matches[0].path[0]), "index,node");
 
         let page = page_children(&doc, doc.root(), 0, 10).unwrap();
         assert_eq!(shape(&page), "offset,parent,rows,total");

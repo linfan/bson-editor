@@ -25,12 +25,15 @@ interface Props {
   actions: RowActions;
   selected: number | null;
   onSelect: (id: number) => void;
+  /** Jump to a node once its row has been loaded (search navigation). */
+  scrollTo?: { node: number; token: number } | null;
 }
 
-export function TreeView({ tree, actions, selected, onSelect }: Props) {
+export function TreeView({ tree, actions, selected, onSelect, scrollTo }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState(600);
   const [scrollTop, setScrollTop] = useState(0);
+  const handledScroll = useRef(-1);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -68,6 +71,18 @@ export function TreeView({ tree, actions, selected, onSelect }: Props) {
   useEffect(() => {
     for (const parentId of pending) loadMore(parentId);
   }, [pending, loadMore]);
+
+  // A reveal is asynchronous, so the row may not exist on the first render
+  // after the request. Leave the token unhandled until it does.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !scrollTo || handledScroll.current === scrollTo.token) return;
+    const index = rows.findIndex((item) => item.row?.id === scrollTo.node);
+    if (index < 0) return;
+    handledScroll.current = scrollTo.token;
+    el.scrollTop = Math.max(0, index * ROW_HEIGHT - el.clientHeight / 3);
+    setScrollTop(el.scrollTop);
+  }, [rows, scrollTo]);
 
   const visible: TreeRow[] = [];
   for (let i = start; i < end; i += 1) visible.push(rows[i]);

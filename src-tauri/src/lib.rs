@@ -33,6 +33,7 @@ pub fn run() {
             commands::list_tabs,
             commands::close_tab,
             commands::children,
+            commands::search,
             commands::node_value,
             commands::copy_subtree,
             commands::set_node_value,

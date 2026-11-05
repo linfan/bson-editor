@@ -1,4 +1,5 @@
 /** Tab strip, toolbar, status bar and the empty state — the chrome around the tree. */
+import { useEffect, useRef } from "react";
 import type { DocInfo } from "../api";
 import { bytes, count, duration, fileName } from "../format";
 
@@ -137,6 +138,80 @@ export function Toolbar({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** The find bar. Enter and Shift+Enter step through matches; Escape closes. */
+export function FindBar({
+  query,
+  onQuery,
+  count,
+  current,
+  truncated,
+  busy,
+  focusToken,
+  onNext,
+  onPrev,
+  onClose,
+}: {
+  query: string;
+  onQuery: (query: string) => void;
+  count: number;
+  current: number;
+  truncated: boolean;
+  busy: boolean;
+  /** Bumped by Ctrl/Cmd+F to pull focus back to the field. */
+  focusToken: number;
+  onNext: () => void;
+  onPrev: () => void;
+  onClose: () => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    input.current?.focus();
+    input.current?.select();
+  }, [focusToken]);
+
+  const status =
+    query.trim().length === 0
+      ? ""
+      : busy
+        ? "searching…"
+        : count === 0
+          ? "no matches"
+          : `${current + 1} / ${count}${truncated ? "+" : ""}`;
+
+  return (
+    <div className="findbar">
+      <input
+        ref={input}
+        className="mono"
+        placeholder="Find in document"
+        spellCheck={false}
+        value={query}
+        onChange={(event) => onQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            if (event.shiftKey) onPrev();
+            else onNext();
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            onClose();
+          }
+        }}
+      />
+      <span className="find-status">{status}</span>
+      <button onClick={onPrev} disabled={count === 0} title="Previous match (Shift+Enter)">
+        ↑
+      </button>
+      <button onClick={onNext} disabled={count === 0} title="Next match (Enter)">
+        ↓
+      </button>
+      <button className="quiet" onClick={onClose} title="Close (Escape)">
+        ×
+      </button>
     </div>
   );
 }

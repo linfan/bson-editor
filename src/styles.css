@@ -294,6 +294,33 @@ textarea {
   color: var(--accent);
 }
 
+/* ---------------------------------------------------------------- findbar */
+
+.findbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+
+.findbar input {
+  width: 320px;
+  max-width: 50vw;
+}
+
+.find-status {
+  min-width: 92px;
+  color: var(--text-dim);
+  font: 11px/1 var(--font-mono);
+}
+
+.findbar button {
+  padding: 3px 8px;
+}
+
 .document {
   display: flex;
   align-items: center;

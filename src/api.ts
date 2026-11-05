@@ -68,6 +68,26 @@ export interface ChildrenPage {
   rows: NodeRow[];
 }
 
+/** One step of the path from the root to a search match. */
+export interface SearchStep {
+  node: number;
+  index: number;
+}
+
+export interface SearchMatch {
+  node: number;
+  key: string | null;
+  preview: string;
+  /** Root down to the match, inclusive. */
+  path: SearchStep[];
+}
+
+export interface SearchResults {
+  matches: SearchMatch[];
+  /** True when the limit cut the walk short, so there are more matches. */
+  truncated: boolean;
+}
+
 export interface EditResult {
   node: number;
   info: DocInfo;
@@ -158,6 +178,9 @@ export const closeTab = (tab: number) => invoke<void>("close_tab", { tab });
 
 export const children = (tab: number, node: number, offset: number, limit: number) =>
   invoke<ChildrenPage>("children", { tab, node, offset, limit });
+
+export const search = (tab: number, query: string, limit: number) =>
+  invoke<SearchResults>("search", { tab, query, limit });
 
 export const nodeValue = (tab: number, node: number) => invoke<Value>("node_value", { tab, node });
 

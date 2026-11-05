@@ -16,8 +16,8 @@ use doccore::{document, Doc, Saved};
 use tauri::State;
 
 use crate::dto::{
-    page_children, ApiError, ChildrenPage, CmdResult, DocInfo, EditResult, OpenOptions, SaveResult,
-    TabInfo,
+    page_children, search as search_doc, ApiError, ChildrenPage, CmdResult, DocInfo, EditResult,
+    OpenOptions, SaveResult, SearchResults, TabInfo,
 };
 
 /// One open document, plus the options it was loaded with so the expand depth
@@ -186,6 +186,19 @@ pub fn children(
     limit: u32,
 ) -> CmdResult<ChildrenPage> {
     read(&state, tab, |s| page_children(&s.doc, node, offset, limit.min(MAX_PAGE)))
+}
+
+/// Find keys and values that contain `query`, in document order. Bounded by
+/// `limit` so a one-letter query in a huge document cannot flood the bridge.
+#[tauri::command]
+pub fn search(
+    state: State<'_, Store>,
+    tab: u64,
+    query: String,
+    limit: u32,
+) -> CmdResult<SearchResults> {
+    let limit = (limit as usize).clamp(1, 2_000);
+    read(&state, tab, |s| Ok(search_doc(&s.doc, &query, limit)))
 }
 
 /// The current value of a node, for prefilling an edit field.

@@ -34,6 +34,8 @@ export interface Tree {
   loadMore: (parentId: number) => void;
   /** Re-read one container after an edit shifted or rewrote its members. */
   refresh: (parentId: number) => Promise<void>;
+  /** Open every ancestor of a node and page its container until the row exists. */
+  reveal: (path: api.SearchStep[]) => Promise<void>;
   clearError: () => void;
 }
 
@@ -53,7 +55,7 @@ export function useTree(tab: number, root: number | null, generation: number): T
   const fetchPage = useCallback(
     async (parentId: number, offset: number, limit: number, append: boolean) => {
       const tag = `${parentId}@${offset}`;
-      if (inFlight.current.has(tag)) return;
+      if (inFlight.current.has(tag)) return null;
       inFlight.current.add(tag);
       setBusy(true);
       try {
@@ -64,8 +66,10 @@ export function useTree(tab: number, root: number | null, generation: number): T
           next.set(parentId, { total: page.total, rows });
           return next;
         });
+        return page;
       } catch (cause) {
         setError(api.errorMessage(cause));
+        return null;
       } finally {
         inFlight.current.delete(tag);
         setBusy(false);
@@ -121,6 +125,29 @@ export function useTree(tab: number, root: number | null, generation: number): T
     [fetchPage],
   );
 
+  const reveal = useCallback(
+    async (path: api.SearchStep[]) => {
+      // Counts are tracked locally because state updates inside the loop do not
+      // reach this closure; without them the next page request would repeat the
+      // same offset.
+      const counts = new Map<number, number>();
+      for (let i = 0; i + 1 < path.length; i += 1) {
+        const parent = path[i].node;
+        const childIndex = path[i + 1].index;
+        setExpanded((prev) => (prev.has(parent) ? prev : new Set(prev).add(parent)));
+        let count = counts.get(parent) ?? current.current.get(parent)?.rows.length ?? 0;
+        while (count <= childIndex) {
+          const page = await fetchPage(parent, count, api.PAGE_SIZE, count > 0);
+          if (!page || page.rows.length === 0) break;
+          count += page.rows.length;
+          if (count >= page.total) break;
+        }
+        counts.set(parent, count);
+      }
+    },
+    [fetchPage],
+  );
+
   const rows = useMemo(() => {
     if (root === null) return [] as TreeRow[];
     const out: TreeRow[] = [];
@@ -144,5 +171,15 @@ export function useTree(tab: number, root: number | null, generation: number): T
     return out;
   }, [root, segments, expanded]);
 
-  return { rows, expanded, busy, error, toggle, loadMore, refresh, clearError: () => setError(null) };
+  return {
+    rows,
+    expanded,
+    busy,
+    error,
+    toggle,
+    loadMore,
+    refresh,
+    reveal,
+    clearError: () => setError(null),
+  };
 }
