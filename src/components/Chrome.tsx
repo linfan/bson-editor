@@ -66,6 +66,8 @@ export function Toolbar({
   onDepth,
   view,
   onView,
+  canCompare,
+  onCompare,
 }: {
   info: DocInfo | null;
   onOpen: () => void;
@@ -77,6 +79,8 @@ export function Toolbar({
   onDepth: (depth: number) => void;
   view: "tree" | "text";
   onView: (view: "tree" | "text") => void;
+  canCompare: boolean;
+  onCompare: () => void;
 }) {
   const depth = info?.expandDepth ?? 0;
   // Changing the depth rebuilds the document from its original bytes, which
@@ -99,6 +103,9 @@ export function Toolbar({
         </button>
         <button onClick={onCopyAll} disabled={!info}>
           Copy JSON
+        </button>
+        <button onClick={onCompare} disabled={!canCompare} title="Diff two open tabs">
+          Compare…
         </button>
       </div>
 

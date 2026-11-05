@@ -16,12 +16,15 @@ export function Modal({
   onClose,
   children,
   wide,
+  diff,
 }: {
   title: string;
   subtitle?: string;
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  /** The comparison view needs the full window width, not a dialog width. */
+  diff?: boolean;
 }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -38,7 +41,11 @@ export function Modal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className={`modal${wide ? " wide" : ""}`} role="dialog" aria-modal="true">
+      <div
+        className={`modal${wide ? " wide" : ""}${diff ? " diff" : ""}`}
+        role="dialog"
+        aria-modal="true"
+      >
         <header>
           <div>
             <h2>{title}</h2>

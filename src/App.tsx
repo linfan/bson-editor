@@ -13,6 +13,7 @@ import type { DocInfo, JsonOptions, NodeRow, SaveOptions, TabInfo, Value } from 
 import { EmptyState, FindBar, StatusBar, TabBar, Toolbar } from "./components/Chrome";
 import { ConfirmDialog, NodeDialog, PasteDialog } from "./components/Dialogs";
 import type { NodeSubmission } from "./components/Dialogs";
+import { DiffDialog } from "./components/DiffDialog";
 import { JsonTextView } from "./components/JsonTextView";
 import { TreeView } from "./components/TreeView";
 import { bytes } from "./format";
@@ -80,6 +81,7 @@ export default function App() {
   const [matchIndex, setMatchIndex] = useState(0);
   const [searching, setSearching] = useState(false);
   const [findFocus, setFindFocus] = useState(0);
+  const [diffOpen, setDiffOpen] = useState(false);
 
   // The tree hook lives inside each tab panel, so its object is parked here for
   // the event handlers that need to refresh the active tab.
@@ -542,6 +544,8 @@ export default function App() {
             prev.map((item) => (item.id === active.id ? { ...item, view } : item)),
           )
         }
+        canCompare={tabs.length > 1}
+        onCompare={() => setDiffOpen(true)}
       />
 
       {findOpen && active && (
@@ -618,6 +622,14 @@ export default function App() {
           danger
           onClose={() => setDialog(null)}
           onConfirm={() => void onConfirmDelete()}
+        />
+      )}
+      {diffOpen && tabs.length > 1 && (
+        <DiffDialog
+          tabs={tabs.map((tab) => ({ id: tab.id, info: tab.info }))}
+          initialLeft={activeId ?? tabs[0].id}
+          initialRight={tabs.find((tab) => tab.id !== (activeId ?? tabs[0].id))?.id ?? null}
+          onClose={() => setDiffOpen(false)}
         />
       )}
       {dialog?.kind === "close" && (
