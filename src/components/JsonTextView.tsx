@@ -64,8 +64,11 @@ export function JsonTextView({
   }, []);
 
   const lines = useMemo(
-    () => buildLines(tree.rows, tree.expanded, rootKind, rootPreview),
-    [tree.rows, tree.expanded, rootKind, rootPreview],
+    () =>
+      tree.rows.length === 0 && tree.busy
+        ? []
+        : buildLines(tree.rows, tree.expanded, rootKind, rootPreview),
+    [tree.rows, tree.expanded, tree.busy, rootKind, rootPreview],
   );
 
   const total = lines.length;

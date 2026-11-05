@@ -138,9 +138,19 @@ export function useTree(tab: number, root: number | null, generation: number): T
         const childIndex = path[i + 1].index;
         setExpanded((prev) => (prev.has(parent) ? prev : new Set(prev).add(parent)));
         let count = counts.get(parent) ?? current.current.get(parent)?.rows.length ?? 0;
+        let retries = 0;
         while (count <= childIndex) {
           const page = await fetchPage(parent, count, api.PAGE_SIZE, count > 0);
-          if (!page || page.rows.length === 0) break;
+          if (!page) {
+            // A page for this offset is already in flight (the initial root
+            // load, say). Give it a moment and pick up however much landed.
+            if (retries >= 5) break;
+            retries += 1;
+            await new Promise((resolve) => setTimeout(resolve, 40));
+            count = Math.max(count, current.current.get(parent)?.rows.length ?? 0);
+            continue;
+          }
+          if (page.rows.length === 0) break;
           count += page.rows.length;
           if (count >= page.total) break;
         }
