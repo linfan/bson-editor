@@ -296,6 +296,16 @@ export default function App() {
     [adopt, fail],
   );
 
+  const onExpandAll = useCallback(() => {
+    if (activeId === null) return;
+    void trees.current.get(activeId)?.expandAll();
+  }, [activeId]);
+
+  const onCollapseAll = useCallback(() => {
+    if (activeId === null) return;
+    trees.current.get(activeId)?.collapseAll();
+  }, [activeId]);
+
   const onCopyRow = useCallback(
     async (tabId: number, row: NodeRow) => {
       try {
@@ -545,6 +555,8 @@ export default function App() {
             prev.map((item) => (item.id === active.id ? { ...item, view } : item)),
           )
         }
+        onExpandAll={onExpandAll}
+        onCollapseAll={onCollapseAll}
       />
 
       {findOpen && active && (

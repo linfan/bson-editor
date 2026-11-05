@@ -38,6 +38,10 @@ export interface Tree {
   refresh: (parentId: number) => Promise<void>;
   /** Open every ancestor of a node and page its container until the row exists. */
   reveal: (path: api.SearchStep[]) => Promise<void>;
+  /** Open every container in the document, paging each to the end. */
+  expandAll: () => Promise<void>;
+  /** Close every container, leaving the top-level rows visible. */
+  collapseAll: () => void;
   clearError: () => void;
 }
 
@@ -53,6 +57,9 @@ export function useTree(tab: number, root: number | null, generation: number): T
   // offset. Assigned during render, which is safe because it only mirrors.
   const current = useRef(segments);
   current.current = segments;
+  // Bumped to abandon an Expand all still paging through an old document or
+  // one the user just collapsed.
+  const expandRun = useRef(0);
 
   const fetchPage = useCallback(
     async (parentId: number, offset: number, limit: number, append: boolean) => {
@@ -86,6 +93,7 @@ export function useTree(tab: number, root: number | null, generation: number): T
   // can hand back the same root id for completely different node ids.
   useEffect(() => {
     if (root === null) return;
+    expandRun.current += 1;
     setSegments(new Map());
     setExpanded(new Set([root]));
     void fetchPage(root, 0, api.PAGE_SIZE, false);
@@ -160,6 +168,59 @@ export function useTree(tab: number, root: number | null, generation: number): T
     [fetchPage],
   );
 
+  const expandAll = useCallback(async () => {
+    if (root === null) return;
+    const run = (expandRun.current += 1);
+    const opened = new Set<number>();
+    setExpanded(new Set());
+    // Breadth first. A container is marked open only after its children have
+    // arrived, so rows never show an open chevron over an empty space, and the
+    // set is committed every so often rather than once per container: copying a
+    // 50,000-id set on every page would cost more than the fetches.
+    const queue: number[] = [root];
+    let head = 0;
+    let lastCommit = performance.now();
+    const commit = () => {
+      setExpanded(new Set(opened));
+      lastCommit = performance.now();
+    };
+    while (head < queue.length) {
+      const parent = queue[head];
+      head += 1;
+      let offset = 0;
+      let retries = 0;
+      for (;;) {
+        const page = await fetchPage(parent, offset, api.PAGE_SIZE, offset > 0);
+        if (run !== expandRun.current) return;
+        if (!page) {
+          // A page already in flight (the initial root load, a reveal) makes
+          // fetchPage decline the tag; wait for it rather than giving up.
+          if (retries >= 5) return;
+          retries += 1;
+          await new Promise((resolve) => setTimeout(resolve, 40));
+          if (run !== expandRun.current) return;
+          continue;
+        }
+        retries = 0;
+        for (const row of page.rows) {
+          if (row.expandable) queue.push(row.id);
+        }
+        offset += page.rows.length;
+        if (page.rows.length === 0 || offset >= page.total) break;
+      }
+      opened.add(parent);
+      if (performance.now() - lastCommit >= 80) commit();
+    }
+    if (run !== expandRun.current) return;
+    commit();
+  }, [root, fetchPage]);
+
+  const collapseAll = useCallback(() => {
+    // Also stops an Expand all that is still walking the old state.
+    expandRun.current += 1;
+    setExpanded(new Set());
+  }, []);
+
   const rows = useMemo(() => {
     if (root === null) return [] as TreeRow[];
     const out: TreeRow[] = [];
@@ -193,6 +254,8 @@ export function useTree(tab: number, root: number | null, generation: number): T
     loadMore,
     refresh,
     reveal,
+    expandAll,
+    collapseAll,
     clearError: () => setError(null),
   };
 }

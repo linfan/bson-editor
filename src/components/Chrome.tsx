@@ -127,6 +127,8 @@ export function Toolbar({
   onDepth,
   view,
   onView,
+  onExpandAll,
+  onCollapseAll,
 }: {
   info: DocInfo | null;
   onSave: () => void;
@@ -136,6 +138,8 @@ export function Toolbar({
   onDepth: (depth: number) => void;
   view: "tree" | "text";
   onView: (view: "tree" | "text") => void;
+  onExpandAll: () => void;
+  onCollapseAll: () => void;
 }) {
   const depth = info?.expandDepth ?? 0;
   // Changing the depth rebuilds the document from its original bytes, which
@@ -178,6 +182,23 @@ export function Toolbar({
         </button>
         <button onClick={onReexpand} disabled={!info} title="Look for JSON strings written since load">
           Re-scan
+        </button>
+      </div>
+
+      <div className="group tree">
+        <button
+          onClick={onExpandAll}
+          disabled={!info || view !== "tree"}
+          title="Expand every container"
+        >
+          Expand all
+        </button>
+        <button
+          onClick={onCollapseAll}
+          disabled={!info || view !== "tree"}
+          title="Collapse every container"
+        >
+          Collapse all
         </button>
       </div>
 

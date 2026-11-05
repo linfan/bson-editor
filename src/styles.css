@@ -313,6 +313,7 @@ textarea {
 }
 
 .toolbar .group.depth,
+.toolbar .group.tree,
 .toolbar .group.view {
   padding-left: 14px;
   border-left: 1px solid var(--line);
