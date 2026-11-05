@@ -16,6 +16,8 @@ export interface TreeRow {
   /** The container this row sits in, which is what an edit has to refresh. */
   parentId: number;
   row?: NodeRow;
+  /** Number of siblings, so the text view knows whether a comma follows. */
+  siblingTotal: number;
   /** Set on the sentinel row that pulls the next page of a large container. */
   remaining?: number;
 }
@@ -155,7 +157,7 @@ export function useTree(tab: number, root: number | null, generation: number): T
       const segment = segments.get(parentId);
       if (!segment) return;
       for (const row of segment.rows) {
-        out.push({ key: `${parentId}/${row.id}`, depth, parentId, row });
+        out.push({ key: `${parentId}/${row.id}`, depth, parentId, row, siblingTotal: segment.total });
         if (expanded.has(row.id)) walk(row.id, depth + 1);
       }
       if (segment.rows.length < segment.total) {
@@ -163,6 +165,7 @@ export function useTree(tab: number, root: number | null, generation: number): T
           key: `${parentId}/more`,
           depth,
           parentId,
+          siblingTotal: segment.total,
           remaining: segment.total - segment.rows.length,
         });
       }

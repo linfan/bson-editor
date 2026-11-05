@@ -272,9 +272,16 @@ textarea {
   gap: 6px;
 }
 
-.toolbar .group.depth {
+.toolbar .group.depth,
+.toolbar .group.view {
   padding-left: 14px;
   border-left: 1px solid var(--line);
+}
+
+.toolbar button.on {
+  background: var(--accent-dim);
+  border-color: #3d5f8f;
+  color: #eaf2ff;
 }
 
 .toolbar .label {
@@ -421,6 +428,62 @@ textarea {
   padding: 40px;
   color: var(--text-faint);
   font-family: var(--font-ui);
+}
+
+/* ------------------------------------------------------------- JSON text */
+
+.jsonview {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg);
+  position: relative;
+}
+
+.json-canvas {
+  position: relative;
+  min-width: 100%;
+}
+
+.json-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.json-line:hover {
+  background: var(--bg-hover);
+}
+
+.json-line.selected {
+  background: var(--bg-selected);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.json-line.more {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.json-line .key {
+  color: var(--accent);
+}
+
+.punctuation,
+.v-punct {
+  color: var(--text-dim);
+}
+
+.v-muted {
+  color: var(--text-faint);
+  font-style: italic;
 }
 
 .indent {

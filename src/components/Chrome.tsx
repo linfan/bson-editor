@@ -64,6 +64,8 @@ export function Toolbar({
   onCopyAll,
   onReexpand,
   onDepth,
+  view,
+  onView,
 }: {
   info: DocInfo | null;
   onOpen: () => void;
@@ -73,6 +75,8 @@ export function Toolbar({
   onCopyAll: () => void;
   onReexpand: () => void;
   onDepth: (depth: number) => void;
+  view: "tree" | "text";
+  onView: (view: "tree" | "text") => void;
 }) {
   const depth = info?.expandDepth ?? 0;
   // Changing the depth rebuilds the document from its original bytes, which
@@ -119,6 +123,24 @@ export function Toolbar({
         </button>
         <button onClick={onReexpand} disabled={!info} title="Look for JSON strings written since load">
           Re-scan
+        </button>
+      </div>
+
+      <div className="group view" title="How the document is presented">
+        <span className="label">View</span>
+        <button
+          className={view === "tree" ? "on" : ""}
+          disabled={!info}
+          onClick={() => onView("tree")}
+        >
+          Tree
+        </button>
+        <button
+          className={view === "text" ? "on" : ""}
+          disabled={!info}
+          onClick={() => onView("text")}
+        >
+          JSON
         </button>
       </div>
 

@@ -13,6 +13,7 @@ import type { DocInfo, JsonOptions, NodeRow, SaveOptions, TabInfo, Value } from 
 import { EmptyState, FindBar, StatusBar, TabBar, Toolbar } from "./components/Chrome";
 import { ConfirmDialog, NodeDialog, PasteDialog } from "./components/Dialogs";
 import type { NodeSubmission } from "./components/Dialogs";
+import { JsonTextView } from "./components/JsonTextView";
 import { TreeView } from "./components/TreeView";
 import { bytes } from "./format";
 import { useTree } from "./useTree";
@@ -45,7 +46,11 @@ interface Tab {
   selected: number | null;
   /** A search result to scroll to; the token makes repeated hits distinct. */
   scroll: { node: number; token: number } | null;
+  /** Table of rows, or the same document as indented JSON text. */
+  view: ViewMode;
 }
+
+type ViewMode = "tree" | "text";
 
 type Dialog =
   | { kind: "paste" }
@@ -136,6 +141,7 @@ export default function App() {
         depth: opened.info.expandDepth,
         selected: null,
         scroll: null,
+        view: "tree",
       },
     ]);
     setActiveId(opened.tab);
@@ -157,6 +163,7 @@ export default function App() {
             depth: item.info.expandDepth,
             selected: null,
             scroll: null,
+            view: "tree" as ViewMode,
           })),
         );
         setActiveId(open[0].tab);
@@ -528,6 +535,13 @@ export default function App() {
         onCopyAll={() => active && void onCopyAll(active)}
         onReexpand={() => active && void onReexpand(active)}
         onDepth={(next) => active && void onDepth(active, next)}
+        view={active?.view ?? "tree"}
+        onView={(view) =>
+          active &&
+          setTabs((prev) =>
+            prev.map((item) => (item.id === active.id ? { ...item, view } : item)),
+          )
+        }
       />
 
       {findOpen && active && (
@@ -649,13 +663,24 @@ function TabPanel({
 
   return (
     <>
-      <TreeView
-        tree={tree}
-        actions={actions}
-        selected={tab.selected}
-        onSelect={onSelect}
-        scrollTo={scrollTo}
-      />
+      {tab.view === "tree" ? (
+        <TreeView
+          tree={tree}
+          actions={actions}
+          selected={tab.selected}
+          onSelect={onSelect}
+          scrollTo={scrollTo}
+        />
+      ) : (
+        <JsonTextView
+          tree={tree}
+          rootKind={tab.info.rootKind}
+          rootPreview={tab.info.rootPreview}
+          selected={tab.selected}
+          onSelect={onSelect}
+          scrollTo={scrollTo}
+        />
+      )}
       {tree.error && (
         <div className="toast-wrap">
           <div className="toast error">

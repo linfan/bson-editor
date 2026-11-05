@@ -29,6 +29,10 @@ export type Format = "json" | "bson";
 
 export interface DocInfo {
   root: number;
+  /** Kind of the document root, used to open the JSON text with `{` or `[`. */
+  rootKind: string;
+  /** Preview of the root, which is all a scalar root has to show. */
+  rootPreview: string;
   path: string | null;
   format: Format;
   dirty: boolean;
@@ -47,6 +51,8 @@ export interface NodeRow {
   index: number;
   key: string | null;
   kind: string;
+  /** Kind after an embedded-JSON overlay, so its brackets are right. */
+  presentedKind: string;
   preview: string;
   childCount: number;
   expandable: boolean;

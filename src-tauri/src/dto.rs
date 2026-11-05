@@ -29,6 +29,11 @@ pub struct TabInfo {
 #[serde(rename_all = "camelCase")]
 pub struct DocInfo {
     pub root: u32,
+    /// Kind of the document root, so the text view knows whether to open with
+    /// `{` or `[` without another round trip.
+    pub root_kind: &'static str,
+    /// The root's row preview, which is all a scalar root has to show.
+    pub root_preview: String,
     pub path: Option<String>,
     pub format: Format,
     pub dirty: bool,
@@ -56,6 +61,9 @@ pub struct NodeRow {
     /// `None` for array elements, which are named by position.
     pub key: Option<String>,
     pub kind: &'static str,
+    /// Kind after an embedded-JSON overlay is applied, so the text view opens
+    /// the right bracket for a string presented as an object or array.
+    pub presented_kind: &'static str,
     pub preview: String,
     /// Members of the node as presented, counting an embedded-JSON overlay.
     pub child_count: u32,
@@ -202,8 +210,11 @@ pub type CmdResult<T> = Result<T, ApiError>;
 
 impl DocInfo {
     pub fn of(doc: &Doc, load_ms: f64) -> DocInfo {
+        let root = doc.node(doc.root()).ok();
         DocInfo {
             root: doc.root(),
+            root_kind: root.map(|n| n.kind.type_name()).unwrap_or("unknown"),
+            root_preview: root.map(|n| preview(doc, n)).unwrap_or_default(),
             path: doc.path.clone(),
             format: doc.format,
             dirty: doc.dirty,
@@ -335,6 +346,7 @@ fn row(doc: &Doc, id: u32, index: u32) -> NodeRow {
         index,
         key: if n.key.is_none() { None } else { Some(doc.key_of(id).into_owned()) },
         kind: n.kind.type_name(),
+        presented_kind: doc.node(presented).map(|p| p.kind.type_name()).unwrap_or(n.kind.type_name()),
         preview: preview(doc, &n),
         child_count,
         expandable: child_count > 0,
@@ -452,6 +464,7 @@ mod tests {
         assert_eq!(s.child_count, 1, "presented as the object inside it");
         assert!(s.expandable);
         assert_eq!(s.kind, "string", "but still a string as far as the file is concerned");
+        assert_eq!(s.presented_kind, "object", "the text view opens a brace for it");
 
         assert_eq!(by_key("a").child_count, 3);
         assert!(!by_key("o").expandable, "an empty object has nothing to expand");
@@ -629,8 +642,8 @@ mod tests {
         );
         assert_eq!(
             shape(&info),
-            "dirty,expandDepth,format,loadMs,magic,path,root,stats,syntheticRoot,\
-             trailingBytes,warnings"
+            "dirty,expandDepth,format,loadMs,magic,path,root,rootKind,rootPreview,stats,\
+             syntheticRoot,trailingBytes,warnings"
         );
         assert_eq!(
             shape(&doc.stats),
@@ -647,7 +660,8 @@ mod tests {
         assert_eq!(shape(&page), "offset,parent,rows,total");
         assert_eq!(
             shape(&page.rows[0]),
-            "childCount,editable,embeddedJson,expandable,id,index,key,kind,overlayLevel,preview"
+            "childCount,editable,embeddedJson,expandable,id,index,key,kind,overlayLevel,\
+             presentedKind,preview"
         );
 
         assert_eq!(shape(&EditResult { node: 1, info: DocInfo::of(&doc, 0.0) }), "info,node");
