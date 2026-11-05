@@ -135,20 +135,24 @@ export function Toolbar({
 
       <div className="group view" title="How the document is presented">
         <span className="label">View</span>
-        <button
-          className={view === "tree" ? "on" : ""}
-          disabled={!info}
-          onClick={() => onView("tree")}
-        >
-          Tree
-        </button>
-        <button
-          className={view === "text" ? "on" : ""}
-          disabled={!info}
-          onClick={() => onView("text")}
-        >
-          JSON
-        </button>
+        <div className="segmented" role="group" aria-label="View">
+          <button
+            className={view === "tree" ? "on" : ""}
+            disabled={!info}
+            aria-pressed={view === "tree"}
+            onClick={() => onView("tree")}
+          >
+            Tree
+          </button>
+          <button
+            className={view === "text" ? "on" : ""}
+            disabled={!info}
+            aria-pressed={view === "text"}
+            onClick={() => onView("text")}
+          >
+            JSON
+          </button>
+        </div>
       </div>
 
       <div className="spacer" />

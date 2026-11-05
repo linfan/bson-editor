@@ -286,6 +286,38 @@ textarea {
   color: #eaf2ff;
 }
 
+/* Two options that read as one control: the halves share a single outline and
+   whichever is active is raised out of the track. */
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: #101317;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.segmented button {
+  padding: 3px 10px;
+  background: transparent;
+  border-color: transparent;
+  border-radius: 4px;
+  color: var(--text-dim);
+}
+
+.segmented button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: transparent;
+  color: var(--text);
+}
+
+.segmented button.on,
+.segmented button.on:hover:not(:disabled) {
+  background: var(--accent-dim);
+  border-color: #3d5f8f;
+  color: #eaf2ff;
+}
+
 .toolbar .label {
   color: var(--text-dim);
 }
