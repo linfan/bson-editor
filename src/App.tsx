@@ -525,13 +525,14 @@ export default function App() {
         activeId={activeId}
         onActivate={setActiveId}
         onClose={onCloseTab}
-        onNew={() => void onOpen()}
+        onOpen={() => void onOpen()}
+        onPaste={() => setDialog({ kind: "paste" })}
+        canCompare={tabs.length > 1}
+        onCompare={() => setDiffOpen(true)}
       />
 
       <Toolbar
         info={active?.info ?? null}
-        onOpen={() => void onOpen()}
-        onPaste={() => setDialog({ kind: "paste" })}
         onSave={() => active && void onSave(active)}
         onSaveAs={() => active && void onSaveAs(active)}
         onCopyAll={() => active && void onCopyAll(active)}
@@ -544,8 +545,6 @@ export default function App() {
             prev.map((item) => (item.id === active.id ? { ...item, view } : item)),
           )
         }
-        canCompare={tabs.length > 1}
-        onCompare={() => setDiffOpen(true)}
       />
 
       {findOpen && active && (

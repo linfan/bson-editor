@@ -1,23 +1,49 @@
 /** Tab strip, toolbar, status bar and the empty state — the chrome around the tree. */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DocInfo } from "../api";
 import { bytes, count, duration, fileName } from "../format";
 
 /** One document per tab. The strip scrolls horizontally rather than wrapping, so
- *  the rows below keep their full height. */
+ *  the rows below keep their full height. Workspace-level actions live here too:
+ *  the `+` menu adds a tab, and Compare pairs two of them. */
 export function TabBar({
   tabs,
   activeId,
   onActivate,
   onClose,
-  onNew,
+  onOpen,
+  onPaste,
+  canCompare,
+  onCompare,
 }: {
   tabs: { id: number; info: DocInfo }[];
   activeId: number | null;
   onActivate: (id: number) => void;
   onClose: (id: number) => void;
-  onNew: () => void;
+  onOpen: () => void;
+  onPaste: () => void;
+  canCompare: boolean;
+  onCompare: () => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menu = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (event: PointerEvent) => {
+      if (!menu.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
   return (
     <div className="tabbar">
       <div className="tablist">
@@ -44,9 +70,46 @@ export function TabBar({
           </div>
         ))}
       </div>
-      <button className="tab-new" onClick={onNew} title="Open a file in a new tab">
-        +
-      </button>
+      <div className="tabbar-actions">
+        {tabs.length > 0 && (
+          <button onClick={onCompare} disabled={!canCompare} title="Diff two open tabs">
+            Compare…
+          </button>
+        )}
+        <div className="newtab" ref={menu}>
+          <button
+            className="tab-new"
+            title="New tab"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            +
+          </button>
+          {menuOpen && (
+            <div className="menu" role="menu">
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onOpen();
+                }}
+              >
+                Open file…
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onPaste();
+                }}
+              >
+                Paste JSON or BSON…
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -57,8 +120,6 @@ const MAX_DEPTH = 12;
 
 export function Toolbar({
   info,
-  onOpen,
-  onPaste,
   onSave,
   onSaveAs,
   onCopyAll,
@@ -66,12 +127,8 @@ export function Toolbar({
   onDepth,
   view,
   onView,
-  canCompare,
-  onCompare,
 }: {
   info: DocInfo | null;
-  onOpen: () => void;
-  onPaste: () => void;
   onSave: () => void;
   onSaveAs: () => void;
   onCopyAll: () => void;
@@ -79,8 +136,6 @@ export function Toolbar({
   onDepth: (depth: number) => void;
   view: "tree" | "text";
   onView: (view: "tree" | "text") => void;
-  canCompare: boolean;
-  onCompare: () => void;
 }) {
   const depth = info?.expandDepth ?? 0;
   // Changing the depth rebuilds the document from its original bytes, which
@@ -91,10 +146,6 @@ export function Toolbar({
   return (
     <div className="toolbar">
       <div className="group">
-        <button onClick={onOpen}>Open…</button>
-        <button onClick={onPaste}>Paste…</button>
-      </div>
-      <div className="group">
         <button onClick={onSave} disabled={!info} title={lockReason}>
           Save
         </button>
@@ -103,9 +154,6 @@ export function Toolbar({
         </button>
         <button onClick={onCopyAll} disabled={!info}>
           Copy JSON
-        </button>
-        <button onClick={onCompare} disabled={!canCompare} title="Diff two open tabs">
-          Compare…
         </button>
       </div>
 
