@@ -5,6 +5,7 @@
 //! take longer than parsing it did, so every command hands back only the slice
 //! the UI is about to paint.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;
@@ -16,6 +17,7 @@ use tauri::State;
 
 use crate::dto::{
     page_children, ApiError, ChildrenPage, CmdResult, DocInfo, EditResult, OpenOptions, SaveResult,
+    TabInfo,
 };
 
 /// One open document, plus the options it was loaded with so the expand depth
@@ -26,46 +28,61 @@ pub struct Session {
     pub load_ms: f64,
 }
 
-/// The app holds a single document at a time.
+/// Every open tab. A `BTreeMap` keeps the tab strip in the order the documents
+/// were opened, which the frontend relies on when it restores a session.
 #[derive(Default)]
-pub struct Store(pub Mutex<Option<Session>>);
+pub struct Sessions {
+    next_id: u64,
+    open: BTreeMap<u64, Session>,
+}
+
+/// The app holds one session per open tab, addressed by a stable id.
+#[derive(Default)]
+pub struct Store(pub Mutex<Sessions>);
 
 /// Largest window the UI may ask for in one call. Paging exists to keep huge
 /// arrays off the bridge, so an unbounded limit would defeat the point.
 const MAX_PAGE: u32 = 5_000;
 
-fn lock<'a>(state: &'a State<'_, Store>) -> CmdResult<MutexGuard<'a, Option<Session>>> {
+fn lock<'a>(state: &'a State<'_, Store>) -> CmdResult<MutexGuard<'a, Sessions>> {
     state.0.lock().map_err(|_| ApiError::state("the document store is wedged; restart the app"))
 }
 
-fn read<R>(state: &State<'_, Store>, f: impl FnOnce(&Session) -> CmdResult<R>) -> CmdResult<R> {
+fn read<R>(
+    state: &State<'_, Store>,
+    tab: u64,
+    f: impl FnOnce(&Session) -> CmdResult<R>,
+) -> CmdResult<R> {
     let guard = lock(state)?;
-    f(guard.as_ref().ok_or_else(ApiError::no_document)?)
+    f(guard.open.get(&tab).ok_or_else(ApiError::no_document)?)
 }
 
 fn write<R>(
     state: &State<'_, Store>,
+    tab: u64,
     f: impl FnOnce(&mut Session) -> CmdResult<R>,
 ) -> CmdResult<R> {
     let mut guard = lock(state)?;
-    f(guard.as_mut().ok_or_else(ApiError::no_document)?)
+    f(guard.open.get_mut(&tab).ok_or_else(ApiError::no_document)?)
 }
 
 fn millis(started: Instant) -> f64 {
     started.elapsed().as_secs_f64() * 1000.0
 }
 
-/// Publish a freshly loaded document as the current one.
+/// Publish a freshly loaded document as a new tab.
 fn install(
     state: &State<'_, Store>,
     doc: Doc,
     options: OpenOptions,
     load_ms: f64,
-) -> CmdResult<DocInfo> {
+) -> CmdResult<TabInfo> {
     let info = DocInfo::of(&doc, load_ms);
     let mut guard = lock(state)?;
-    *guard = Some(Session { doc, opts: options.load(), load_ms });
-    Ok(info)
+    let tab = guard.next_id;
+    guard.next_id += 1;
+    guard.open.insert(tab, Session { doc, opts: options.load(), load_ms });
+    Ok(TabInfo { tab, info })
 }
 
 /// Load a file straight into the store, for the `bson-editor <path>` form.
@@ -86,7 +103,9 @@ pub fn open_into(store: &Store, path: &str) {
         Ok(doc) => {
             let load_ms = millis(started);
             if let Ok(mut guard) = store.0.lock() {
-                *guard = Some(Session { doc, opts, load_ms });
+                let tab = guard.next_id;
+                guard.next_id += 1;
+                guard.open.insert(tab, Session { doc, opts, load_ms });
             }
         }
         Err(err) => eprintln!("could not open {path}: {err}"),
@@ -112,7 +131,7 @@ pub fn open_file(
     state: State<'_, Store>,
     path: String,
     options: Option<OpenOptions>,
-) -> CmdResult<DocInfo> {
+) -> CmdResult<TabInfo> {
     let options = options.unwrap_or_default();
     let started = Instant::now();
     let bytes = fs::read(&path)?;
@@ -129,16 +148,31 @@ pub fn load_text(
     state: State<'_, Store>,
     text: String,
     options: Option<OpenOptions>,
-) -> CmdResult<DocInfo> {
+) -> CmdResult<TabInfo> {
     let options = options.unwrap_or_default();
     let started = Instant::now();
     let doc = document::load_text(&text, options.load())?;
     install(&state, doc, options, millis(started))
 }
 
+/// Every open tab, in the order it was opened. The frontend calls this once on
+/// mount to pick up a document that `bson-editor <path>` loaded during setup.
 #[tauri::command]
-pub fn doc_info(state: State<'_, Store>) -> CmdResult<DocInfo> {
-    read(&state, |s| Ok(DocInfo::of(&s.doc, s.load_ms)))
+pub fn list_tabs(state: State<'_, Store>) -> CmdResult<Vec<TabInfo>> {
+    let guard = lock(&state)?;
+    Ok(guard
+        .open
+        .iter()
+        .map(|(&tab, s)| TabInfo { tab, info: DocInfo::of(&s.doc, s.load_ms) })
+        .collect())
+}
+
+/// Drop a tab and everything it holds. Large documents make this worth doing
+/// eagerly rather than waiting for the process to exit.
+#[tauri::command]
+pub fn close_tab(state: State<'_, Store>, tab: u64) -> CmdResult<()> {
+    let mut guard = lock(&state)?;
+    guard.open.remove(&tab).map(|_| ()).ok_or_else(ApiError::no_document)
 }
 
 /// One window of a container's children. This is the tree's only data source,
@@ -146,17 +180,18 @@ pub fn doc_info(state: State<'_, Store>) -> CmdResult<DocInfo> {
 #[tauri::command]
 pub fn children(
     state: State<'_, Store>,
+    tab: u64,
     node: u32,
     offset: u32,
     limit: u32,
 ) -> CmdResult<ChildrenPage> {
-    read(&state, |s| page_children(&s.doc, node, offset, limit.min(MAX_PAGE)))
+    read(&state, tab, |s| page_children(&s.doc, node, offset, limit.min(MAX_PAGE)))
 }
 
 /// The current value of a node, for prefilling an edit field.
 #[tauri::command]
-pub fn node_value(state: State<'_, Store>, node: u32) -> CmdResult<Value> {
-    read(&state, |s| Ok(edit::value_of(&s.doc, node)?))
+pub fn node_value(state: State<'_, Store>, tab: u64, node: u32) -> CmdResult<Value> {
+    read(&state, tab, |s| Ok(edit::value_of(&s.doc, node)?))
 }
 
 /// Serialize any subtree as formatted JSON text, for the clipboard
@@ -165,24 +200,35 @@ pub fn node_value(state: State<'_, Store>, node: u32) -> CmdResult<Value> {
 #[tauri::command]
 pub fn copy_subtree(
     state: State<'_, Store>,
+    tab: u64,
     node: u32,
     options: Option<JsonOptions>,
 ) -> CmdResult<String> {
     let options = options.unwrap_or_default();
-    read(&state, |s| Ok(s.doc.to_json(node, &options)?))
+    read(&state, tab, |s| Ok(s.doc.to_json(node, &options)?))
 }
 
 #[tauri::command]
-pub fn set_node_value(state: State<'_, Store>, node: u32, value: Value) -> CmdResult<EditResult> {
-    write(&state, |s| {
+pub fn set_node_value(
+    state: State<'_, Store>,
+    tab: u64,
+    node: u32,
+    value: Value,
+) -> CmdResult<EditResult> {
+    write(&state, tab, |s| {
         edit::set_value(&mut s.doc, node, value)?;
         Ok(EditResult { node, info: DocInfo::of(&s.doc, s.load_ms) })
     })
 }
 
 #[tauri::command]
-pub fn rename_node(state: State<'_, Store>, node: u32, key: String) -> CmdResult<EditResult> {
-    write(&state, |s| {
+pub fn rename_node(
+    state: State<'_, Store>,
+    tab: u64,
+    node: u32,
+    key: String,
+) -> CmdResult<EditResult> {
+    write(&state, tab, |s| {
         edit::rename(&mut s.doc, node, &key)?;
         Ok(EditResult { node, info: DocInfo::of(&s.doc, s.load_ms) })
     })
@@ -191,12 +237,13 @@ pub fn rename_node(state: State<'_, Store>, node: u32, key: String) -> CmdResult
 #[tauri::command]
 pub fn insert_node(
     state: State<'_, Store>,
+    tab: u64,
     parent: u32,
     index: u32,
     key: Option<String>,
     value: Value,
 ) -> CmdResult<EditResult> {
-    write(&state, |s| {
+    write(&state, tab, |s| {
         let id = edit::insert(&mut s.doc, parent, index as usize, key, value)?;
         Ok(EditResult { node: id, info: DocInfo::of(&s.doc, s.load_ms) })
     })
@@ -206,12 +253,13 @@ pub fn insert_node(
 #[tauri::command]
 pub fn paste_json(
     state: State<'_, Store>,
+    tab: u64,
     parent: u32,
     index: u32,
     key: Option<String>,
     json: String,
 ) -> CmdResult<EditResult> {
-    write(&state, |s| {
+    write(&state, tab, |s| {
         let id = edit::insert_json(&mut s.doc, parent, index as usize, key, &json)?;
         Ok(EditResult { node: id, info: DocInfo::of(&s.doc, s.load_ms) })
     })
@@ -220,8 +268,13 @@ pub fn paste_json(
 /// Overwrite a node with a pasted structure. Returns the new node's id, which
 /// differs from the old one because the replacement is freshly parsed.
 #[tauri::command]
-pub fn replace_node(state: State<'_, Store>, node: u32, json: String) -> CmdResult<EditResult> {
-    write(&state, |s| {
+pub fn replace_node(
+    state: State<'_, Store>,
+    tab: u64,
+    node: u32,
+    json: String,
+) -> CmdResult<EditResult> {
+    write(&state, tab, |s| {
         let id = edit::replace_with_json(&mut s.doc, node, &json)?;
         Ok(EditResult { node: id, info: DocInfo::of(&s.doc, s.load_ms) })
     })
@@ -230,8 +283,8 @@ pub fn replace_node(state: State<'_, Store>, node: u32, json: String) -> CmdResu
 /// Delete a node. The result names the parent, which is what the UI has to
 /// re-read.
 #[tauri::command]
-pub fn remove_node(state: State<'_, Store>, node: u32) -> CmdResult<EditResult> {
-    write(&state, |s| {
+pub fn remove_node(state: State<'_, Store>, tab: u64, node: u32) -> CmdResult<EditResult> {
+    write(&state, tab, |s| {
         let parent = s.doc.parent_of(node);
         edit::remove(&mut s.doc, node)?;
         Ok(EditResult { node: parent, info: DocInfo::of(&s.doc, s.load_ms) })
@@ -244,8 +297,8 @@ pub fn remove_node(state: State<'_, Store>, node: u32) -> CmdResult<EditResult> 
 /// folded until this runs. Deepening the depth also goes through here; lowering
 /// it needs `set_expand_depth`, which rebuilds from the original bytes.
 #[tauri::command]
-pub fn reexpand(state: State<'_, Store>) -> CmdResult<DocInfo> {
-    write(&state, |s| {
+pub fn reexpand(state: State<'_, Store>, tab: u64) -> CmdResult<DocInfo> {
+    write(&state, tab, |s| {
         let depth = s.doc.expand_depth;
         s.doc.expand_embedded_json(depth);
         Ok(DocInfo::of(&s.doc, s.load_ms))
@@ -255,8 +308,8 @@ pub fn reexpand(state: State<'_, Store>) -> CmdResult<DocInfo> {
 /// Change how many levels of nested JSON string to unfold. Refused while there
 /// are unsaved edits, because rebuilding would discard them.
 #[tauri::command]
-pub fn set_expand_depth(state: State<'_, Store>, depth: u8) -> CmdResult<DocInfo> {
-    write(&state, |s| {
+pub fn set_expand_depth(state: State<'_, Store>, tab: u64, depth: u8) -> CmdResult<DocInfo> {
+    write(&state, tab, |s| {
         s.opts.expand_json_depth = depth;
         let opts = s.opts;
         s.doc.set_expand_depth(depth, &opts)?;
@@ -269,11 +322,12 @@ pub fn set_expand_depth(state: State<'_, Store>, depth: u8) -> CmdResult<DocInfo
 #[tauri::command]
 pub fn save_file(
     state: State<'_, Store>,
+    tab: u64,
     path: Option<String>,
     options: Option<SaveOptions>,
 ) -> CmdResult<SaveResult> {
     let options = options.unwrap_or_default();
-    let prepared = read(&state, |s| {
+    let prepared = read(&state, tab, |s| {
         let target = match path.clone() {
             Some(p) => p,
             None => s.doc.path.clone().ok_or_else(|| {
@@ -288,7 +342,7 @@ pub fn save_file(
     let bytes_written = prepared.saved.bytes.len();
     let target = prepared.target.clone();
     // Only clear the dirty flag once the bytes are actually on disk.
-    write(&state, |s| {
+    write(&state, tab, |s| {
         s.doc.dirty = false;
         s.doc.path = Some(target);
         Ok(())
@@ -304,9 +358,13 @@ pub fn save_file(
 
 /// Serialize without touching the disk, for "copy the whole document".
 #[tauri::command]
-pub fn export_text(state: State<'_, Store>, options: Option<SaveOptions>) -> CmdResult<String> {
+pub fn export_text(
+    state: State<'_, Store>,
+    tab: u64,
+    options: Option<SaveOptions>,
+) -> CmdResult<String> {
     let options = options.unwrap_or_default();
-    read(&state, |s| {
+    read(&state, tab, |s| {
         let saved = s.doc.save(&options)?;
         String::from_utf8(saved.bytes).map_err(|_| {
             ApiError::state("this document is BSON; pass format: json or use saveFile")

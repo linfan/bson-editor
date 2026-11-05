@@ -15,6 +15,15 @@ use serde::{Deserialize, Serialize};
 /// `copySubtree` away; this is only what fits in a tree row.
 const PREVIEW_BYTES: usize = 240;
 
+/// An open tab: the id every other command addresses it by, plus its document
+/// state.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TabInfo {
+    pub tab: u64,
+    pub info: DocInfo,
+}
+
 /// Everything the status bar and the toolbar need about the open document.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -452,6 +461,10 @@ mod tests {
 
         let doc = loaded(r#"{"a":[1,2]}"#);
         let info = DocInfo::of(&doc, 1.5);
+        assert_eq!(
+            shape(&TabInfo { tab: 0, info: DocInfo::of(&doc, 0.0) }),
+            "info,tab"
+        );
         assert_eq!(
             shape(&info),
             "dirty,expandDepth,format,loadMs,magic,path,root,stats,syntheticRoot,\

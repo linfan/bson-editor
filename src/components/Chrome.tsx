@@ -1,6 +1,54 @@
-/** Toolbar, status bar and the empty state — the chrome around the tree. */
+/** Tab strip, toolbar, status bar and the empty state — the chrome around the tree. */
 import type { DocInfo } from "../api";
 import { bytes, count, duration, fileName } from "../format";
+
+/** One document per tab. The strip scrolls horizontally rather than wrapping, so
+ *  the rows below keep their full height. */
+export function TabBar({
+  tabs,
+  activeId,
+  onActivate,
+  onClose,
+  onNew,
+}: {
+  tabs: { id: number; info: DocInfo }[];
+  activeId: number | null;
+  onActivate: (id: number) => void;
+  onClose: (id: number) => void;
+  onNew: () => void;
+}) {
+  return (
+    <div className="tabbar">
+      <div className="tablist">
+        {tabs.map((tab) => (
+          <div
+            key={tab.id}
+            className={`tab${tab.id === activeId ? " on" : ""}`}
+            onClick={() => onActivate(tab.id)}
+            title={tab.info.path ?? "Pasted content"}
+          >
+            <span className={`dot${tab.info.dirty ? " dirty" : ""}`} />
+            <span className="tab-name">{tab.info.path ? fileName(tab.info.path) : "pasted"}</span>
+            <span className={`badge b-${tab.info.format}`}>{tab.info.format}</span>
+            <button
+              className="tab-close"
+              title="Close tab"
+              onClick={(event) => {
+                event.stopPropagation();
+                onClose(tab.id);
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+      <button className="tab-new" onClick={onNew} title="Open a file in a new tab">
+        +
+      </button>
+    </div>
+  );
+}
 
 /** Deepest embedded-JSON chain the stepper offers. Deeper chains exist but each
  *  level roughly doubles the escaping, so past this the text is unreadable. */

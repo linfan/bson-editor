@@ -55,6 +55,12 @@ export interface NodeRow {
   editable: boolean;
 }
 
+/** An open tab: the id every command addresses it by, plus its document state. */
+export interface TabInfo {
+  tab: number;
+  info: DocInfo;
+}
+
 export interface ChildrenPage {
   parent: number;
   offset: number;
@@ -140,43 +146,59 @@ export function errorMessage(error: unknown): string {
 export const coreVersion = () => invoke<string>("core_version");
 
 export const openFile = (path: string, options?: OpenOptions) =>
-  invoke<DocInfo>("open_file", { path, options });
+  invoke<TabInfo>("open_file", { path, options });
 
 export const loadText = (text: string, options?: OpenOptions) =>
-  invoke<DocInfo>("load_text", { text, options });
+  invoke<TabInfo>("load_text", { text, options });
 
-export const docInfo = () => invoke<DocInfo>("doc_info");
+/** Every open tab, including one loaded from the command line before mount. */
+export const listTabs = () => invoke<TabInfo[]>("list_tabs");
 
-export const children = (node: number, offset: number, limit: number) =>
-  invoke<ChildrenPage>("children", { node, offset, limit });
+export const closeTab = (tab: number) => invoke<void>("close_tab", { tab });
 
-export const nodeValue = (node: number) => invoke<Value>("node_value", { node });
+export const children = (tab: number, node: number, offset: number, limit: number) =>
+  invoke<ChildrenPage>("children", { tab, node, offset, limit });
 
-export const copySubtree = (node: number, options?: JsonOptions) =>
-  invoke<string>("copy_subtree", { node, options });
+export const nodeValue = (tab: number, node: number) => invoke<Value>("node_value", { tab, node });
 
-export const setNodeValue = (node: number, value: Value) =>
-  invoke<EditResult>("set_node_value", { node, value });
+export const copySubtree = (tab: number, node: number, options?: JsonOptions) =>
+  invoke<string>("copy_subtree", { tab, node, options });
 
-export const renameNode = (node: number, key: string) =>
-  invoke<EditResult>("rename_node", { node, key });
+export const setNodeValue = (tab: number, node: number, value: Value) =>
+  invoke<EditResult>("set_node_value", { tab, node, value });
 
-export const insertNode = (parent: number, index: number, key: string | null, value: Value) =>
-  invoke<EditResult>("insert_node", { parent, index, key, value });
+export const renameNode = (tab: number, node: number, key: string) =>
+  invoke<EditResult>("rename_node", { tab, node, key });
 
-export const pasteJson = (parent: number, index: number, key: string | null, json: string) =>
-  invoke<EditResult>("paste_json", { parent, index, key, json });
+export const insertNode = (
+  tab: number,
+  parent: number,
+  index: number,
+  key: string | null,
+  value: Value,
+) => invoke<EditResult>("insert_node", { tab, parent, index, key, value });
 
-export const replaceNode = (node: number, json: string) =>
-  invoke<EditResult>("replace_node", { node, json });
+export const pasteJson = (
+  tab: number,
+  parent: number,
+  index: number,
+  key: string | null,
+  json: string,
+) => invoke<EditResult>("paste_json", { tab, parent, index, key, json });
 
-export const removeNode = (node: number) => invoke<EditResult>("remove_node", { node });
+export const replaceNode = (tab: number, node: number, json: string) =>
+  invoke<EditResult>("replace_node", { tab, node, json });
 
-export const reexpand = () => invoke<DocInfo>("reexpand");
+export const removeNode = (tab: number, node: number) =>
+  invoke<EditResult>("remove_node", { tab, node });
 
-export const setExpandDepth = (depth: number) => invoke<DocInfo>("set_expand_depth", { depth });
+export const reexpand = (tab: number) => invoke<DocInfo>("reexpand", { tab });
 
-export const saveFile = (path: string | null, options?: SaveOptions) =>
-  invoke<SaveResult>("save_file", { path, options });
+export const setExpandDepth = (tab: number, depth: number) =>
+  invoke<DocInfo>("set_expand_depth", { tab, depth });
 
-export const exportText = (options?: SaveOptions) => invoke<string>("export_text", { options });
+export const saveFile = (tab: number, path: string | null, options?: SaveOptions) =>
+  invoke<SaveResult>("save_file", { tab, path, options });
+
+export const exportText = (tab: number, options?: SaveOptions) =>
+  invoke<string>("export_text", { tab, options });

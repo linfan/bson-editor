@@ -37,7 +37,7 @@ export interface Tree {
   clearError: () => void;
 }
 
-export function useTree(root: number | null, generation: number): Tree {
+export function useTree(tab: number, root: number | null, generation: number): Tree {
   const [segments, setSegments] = useState<Map<number, Segment>>(() => new Map());
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
   const [busy, setBusy] = useState(false);
@@ -57,7 +57,7 @@ export function useTree(root: number | null, generation: number): Tree {
       inFlight.current.add(tag);
       setBusy(true);
       try {
-        const page = await api.children(parentId, offset, limit);
+        const page = await api.children(tab, parentId, offset, limit);
         setSegments((prev) => {
           const next = new Map(prev);
           const rows = append ? [...(next.get(parentId)?.rows ?? []), ...page.rows] : page.rows;
@@ -71,7 +71,7 @@ export function useTree(root: number | null, generation: number): Tree {
         setBusy(false);
       }
     },
-    [],
+    [tab],
   );
 
   // Opening a document reads the first page of the root and leaves it expanded,
