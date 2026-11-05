@@ -6,11 +6,11 @@
  * That keeps the comparison independent of the paged tree, and it means the two
  * trees may be at different expand depths without affecting the result.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../api";
 import type { DocInfo, JsonOptions, SaveOptions } from "../api";
 import { diffTexts } from "../diff";
-import type { Diff, DiffSide } from "../diff";
+import type { Diff, DiffRow, DiffSide } from "../diff";
 import { fileName } from "../format";
 import { Modal } from "./Dialogs";
 
@@ -49,6 +49,10 @@ export function DiffDialog({
   const [diff, setDiff] = useState<Diff | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Which difference the prev/next buttons last landed on, or -1. */
+  const [cursor, setCursor] = useState(-1);
+  /** A row to bring into view; a new object makes a repeat jump land again. */
+  const [jump, setJump] = useState<{ row: number } | null>(null);
 
   useEffect(() => {
     if (leftId === null || rightId === null || leftId === rightId) {
@@ -76,6 +80,39 @@ export function DiffDialog({
       cancelled = true;
     };
   }, [leftId, rightId]);
+
+  // row indices that hold any difference, in document order, for stepping
+  // through them and for the side bars
+  const changes = useMemo(() => (diff ? changeRows(diff.rows) : []), [diff]);
+
+  useEffect(() => {
+    setCursor(-1);
+    setJump(null);
+  }, [diff]);
+
+  const step = useCallback(
+    (delta: number) => {
+      if (changes.length === 0) return;
+      const next =
+        cursor < 0
+          ? delta > 0
+            ? 0
+            : changes.length - 1
+          : (cursor + delta + changes.length) % changes.length;
+      setCursor(next);
+      setJump({ row: changes[next] });
+    },
+    [changes, cursor],
+  );
+
+  // A click on a bar block is a jump too; keep the counter in step with it.
+  const onJumpRow = useCallback(
+    (row: number) => {
+      const index = changes.indexOf(row);
+      if (index >= 0) setCursor(index);
+    },
+    [changes],
+  );
 
   const same = leftId !== null && leftId === rightId;
 
@@ -134,19 +171,52 @@ export function DiffDialog({
               : `+${diff.stats.added} added · −${diff.stats.removed} removed · ~${diff.stats.changed} changed`}
           </span>
         )}
+        {diff && !loading && changes.length > 0 && (
+          <div className="diff-nav">
+            <button
+              className="quiet"
+              onClick={() => step(-1)}
+              title="Previous difference"
+              aria-label="Previous difference"
+            >
+              ↑
+            </button>
+            <span className="diff-position">
+              {cursor < 0 ? "–" : cursor + 1} / {changes.length}
+            </span>
+            <button
+              className="quiet"
+              onClick={() => step(1)}
+              title="Next difference"
+              aria-label="Next difference"
+            >
+              ↓
+            </button>
+          </div>
+        )}
       </div>
 
       {same && <p className="diff-note">Pick two different tabs to compare.</p>}
       {!same && loading && <p className="diff-note">Comparing…</p>}
       {!same && error && <p className="error diff-error">{error}</p>}
-      {!same && !loading && diff && <DiffBody diff={diff} />}
+      {!same && !loading && diff && (
+        <DiffBody diff={diff} jump={jump} onJumpRow={onJumpRow} />
+      )}
     </Modal>
   );
 }
 
 /** Virtualized body: a document pair can be tens of thousands of lines and only
  *  the rows in the viewport are worth mounting. */
-function DiffBody({ diff }: { diff: Diff }) {
+function DiffBody({
+  diff,
+  jump,
+  onJumpRow,
+}: {
+  diff: Diff;
+  jump: { row: number } | null;
+  onJumpRow: (row: number) => void;
+}) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState(500);
   const [scrollTop, setScrollTop] = useState(0);
@@ -160,6 +230,17 @@ function DiffBody({ diff }: { diff: Diff }) {
     return () => observer.disconnect();
   }, []);
 
+  const scrollToRow = useCallback((row: number) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const top = row * DIFF_HEIGHT - el.clientHeight / 2 + DIFF_HEIGHT / 2;
+    el.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    if (jump) scrollToRow(jump.row);
+  }, [jump, scrollToRow]);
+
   const total = diff.rows.length;
   const last = Math.max(0, total - 1);
   const scrollRow = Math.min(Math.floor(scrollTop / DIFF_HEIGHT), last);
@@ -167,25 +248,94 @@ function DiffBody({ diff }: { diff: Diff }) {
   const end = Math.min(total, start + Math.ceil(viewport / DIFF_HEIGHT) + OVERSCAN * 2);
 
   const visible = useMemo(() => diff.rows.slice(start, end), [diff.rows, start, end]);
+  const bars = useMemo(
+    () => ({
+      left: segments(diff.rows, "left"),
+      right: segments(diff.rows, "right"),
+    }),
+    [diff.rows],
+  );
+
+  const goTo = (row: number) => {
+    onJumpRow(row);
+    scrollToRow(row);
+  };
 
   return (
-    <div
-      className="diff-body"
-      ref={scrollRef}
-      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
-    >
-      <div className="diff-canvas" style={{ height: total * DIFF_HEIGHT }}>
-        {visible.map((row, offset) => (
-          <div
-            key={row.key}
-            className="diff-row"
-            style={{ top: (start + offset) * DIFF_HEIGHT, height: DIFF_HEIGHT }}
-          >
-            <Cell side={row.left} />
-            <Cell side={row.right} />
-          </div>
-        ))}
+    <div className="diff-stage">
+      <Bar markers={bars.left} total={total} onJump={goTo} />
+      <div
+        className="diff-body"
+        ref={scrollRef}
+        onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      >
+        <div className="diff-canvas" style={{ height: total * DIFF_HEIGHT }}>
+          {visible.map((row, offset) => (
+            <div
+              key={row.key}
+              className="diff-row"
+              style={{ top: (start + offset) * DIFF_HEIGHT, height: DIFF_HEIGHT }}
+            >
+              <Cell side={row.left} />
+              <Cell side={row.right} />
+            </div>
+          ))}
+        </div>
       </div>
+      <Bar markers={bars.right} total={total} onJump={goTo} />
+    </div>
+  );
+}
+
+interface Marker {
+  kind: "added" | "removed" | "changed";
+  /** Inclusive row range in the aligned diff. */
+  start: number;
+  end: number;
+}
+
+/** Contiguous runs of differing rows on one side, for the overview bars. */
+function segments(rows: DiffRow[], side: "left" | "right"): Marker[] {
+  const markers: Marker[] = [];
+  rows.forEach((row, index) => {
+    const cell = row[side];
+    if (!cell || cell.kind === "equal") return;
+    const kind = cell.kind === "change" ? "changed" : side === "left" ? "removed" : "added";
+    const lastMarker = markers[markers.length - 1];
+    if (lastMarker && lastMarker.kind === kind && lastMarker.end === index - 1) {
+      lastMarker.end = index;
+    } else {
+      markers.push({ kind, start: index, end: index });
+    }
+  });
+  return markers;
+}
+
+/** An overview strip: the whole document in miniature, with each changed run
+ *  drawn at its proportional position. Blocks are clickable shortcuts. */
+function Bar({
+  markers,
+  total,
+  onJump,
+}: {
+  markers: Marker[];
+  total: number;
+  onJump: (row: number) => void;
+}) {
+  return (
+    <div className="diff-gutter">
+      {markers.map((marker) => (
+        <div
+          key={`${marker.kind}-${marker.start}`}
+          className={`diff-marker ${marker.kind}`}
+          style={{
+            top: `${(marker.start / total) * 100}%`,
+            height: `${((marker.end - marker.start + 1) / total) * 100}%`,
+          }}
+          title={`${marker.kind} · click to jump`}
+          onClick={() => onJump(marker.start)}
+        />
+      ))}
     </div>
   );
 }
@@ -212,6 +362,14 @@ function withHighlight(side: DiffSide) {
       {side.text.slice(span.end)}
     </>
   );
+}
+
+function changeRows(rows: DiffRow[]): number[] {
+  const indices: number[] = [];
+  rows.forEach((row, index) => {
+    if (row.left?.kind !== "equal" || row.right?.kind !== "equal") indices.push(index);
+  });
+  return indices;
 }
 
 function label(tab: TabOption): string {

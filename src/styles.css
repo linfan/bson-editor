@@ -742,12 +742,76 @@ textarea {
   padding: 12px 14px;
 }
 
-.diff-body {
+.diff-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.diff-nav button {
+  padding: 2px 7px;
+  line-height: 1.2;
+}
+
+.diff-position {
+  min-width: 44px;
+  text-align: center;
+  color: var(--text-dim);
+  font: 11px/1.4 var(--font-mono);
+}
+
+.diff-stage {
   flex: 1;
   min-height: 0;
+  display: flex;
+}
+
+.diff-body {
+  flex: 1;
+  min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
   background: var(--bg);
+}
+
+/* Overview strips, one per pane, so a mark sits beside the side it belongs to. */
+.diff-gutter {
+  position: relative;
+  flex: none;
+  width: 10px;
+  overflow: hidden;
+  background: var(--bg-raised);
+  border-right: 1px solid var(--line-soft);
+}
+
+.diff-gutter:last-child {
+  border-right: none;
+  border-left: 1px solid var(--line-soft);
+}
+
+.diff-marker {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  min-height: 2px;
+  border-radius: 1px;
+  cursor: pointer;
+}
+
+.diff-marker:hover {
+  filter: brightness(1.4);
+}
+
+.diff-marker.added {
+  background: rgba(127, 216, 143, 0.75);
+}
+
+.diff-marker.removed {
+  background: rgba(255, 122, 112, 0.75);
+}
+
+.diff-marker.changed {
+  background: rgba(232, 180, 92, 0.8);
 }
 
 .diff-canvas {
