@@ -10,9 +10,9 @@ responsive while you scroll it.
 ## Running it
 
 ```sh
-pnpm install
-pnpm tauri dev              # develop with hot reload
-pnpm tauri build            # produce an installable bundle
+npm install
+npm run tauri -- dev        # develop with hot reload
+npm run tauri -- build      # produce an installable bundle
 cargo build -p bson-editor  # just the binary
 ./target/debug/bson-editor path/to/document.bson
 ```
@@ -20,18 +20,18 @@ cargo build -p bson-editor  # just the binary
 The last form opens straight into the document: the file is parsed during startup, before
 the window exists, and the webview picks it up on mount.
 
-`pnpm tauri build` produces the `.app` and then a `.dmg`. Making the disk image drives
+`npm run tauri -- build` produces the `.app` and then a `.dmg`. Making the disk image drives
 Finder through AppleScript, so it needs Automation permission; a shell without it fails
-with `-1743` after the `.app` is already built. `pnpm tauri build --bundles app` stops
+with `-1743` after the `.app` is already built. `npm run tauri -- build --bundles app` stops
 before that step.
 
 | Script | What it does |
 | --- | --- |
-| `pnpm dev` | Vite dev server on its own, no Tauri shell |
-| `pnpm build` | Typecheck and bundle the frontend into `dist/` |
-| `pnpm typecheck` | `tsc --noEmit` |
-| `pnpm test:core` | The engine's Rust test suite |
-| `pnpm perf [mb]` | The performance harness, on a synthetic document of that many megabytes |
+| `npm run dev` | Vite dev server on its own, no Tauri shell |
+| `npm run build` | Typecheck and bundle the frontend into `dist/` |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run test:core` | The engine's Rust test suite |
+| `npm run perf -- [mb]` | The performance harness, on a synthetic document of that many megabytes |
 
 `cargo test --workspace` runs everything: 135 tests across the engine and the IPC layer.
 
@@ -82,7 +82,7 @@ layout from a text field would corrupt them, so the editor declines rather than 
 
 ## Performance
 
-`pnpm perf` builds a synthetic document and measures the real paths. Apple Silicon,
+`npm run perf` builds a synthetic document and measures the real paths. Apple Silicon,
 release build:
 
 | | 12 MB | 48 MB |

@@ -1,5 +1,5 @@
-PNPM ?= pnpm
-TAURI := $(PNPM) tauri
+NPM ?= npm
+TAURI := $(NPM) run tauri --
 
 TARGET_DIR ?= target/release
 BUNDLE_DIR := $(TARGET_DIR)/bundle
@@ -12,8 +12,8 @@ help: ## Show these targets
 	@echo "Targets:"
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-11s %s\n", $$1, $$2}'
 
-node_modules: package.json pnpm-lock.yaml
-	$(PNPM) install --frozen-lockfile
+node_modules: package.json package-lock.json
+	$(NPM) ci
 
 dev: node_modules ## Run the app with hot reload
 	$(TAURI) dev
@@ -39,7 +39,7 @@ test: ## Run the engine and IPC test suites
 	cargo test --workspace
 
 typecheck: node_modules ## Typecheck the frontend
-	$(PNPM) typecheck
+	$(NPM) run typecheck
 
 clean: ## Remove the frontend and bundle outputs
 	rm -rf dist "$(BUNDLE_DIR)"
