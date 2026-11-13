@@ -16,7 +16,7 @@ export function TabBar({
   canCompare,
   onCompare,
 }: {
-  tabs: { id: number; info: DocInfo }[];
+  tabs: { id: number; info: DocInfo; label: string | null }[];
   activeId: number | null;
   onActivate: (id: number) => void;
   onClose: (id: number) => void;
@@ -52,10 +52,12 @@ export function TabBar({
             key={tab.id}
             className={`tab${tab.id === activeId ? " on" : ""}`}
             onClick={() => onActivate(tab.id)}
-            title={tab.info.path ?? "Pasted content"}
+            title={tab.label ?? tab.info.path ?? "Pasted content"}
           >
             <span className={`dot${tab.info.dirty ? " dirty" : ""}`} />
-            <span className="tab-name">{tab.info.path ? fileName(tab.info.path) : "pasted"}</span>
+            <span className="tab-name">
+              {tab.label ?? (tab.info.path ? fileName(tab.info.path) : "pasted")}
+            </span>
             <span className={`badge b-${tab.info.format}`}>{tab.info.format}</span>
             <button
               className="tab-close"

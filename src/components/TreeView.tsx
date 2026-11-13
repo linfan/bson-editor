@@ -5,9 +5,10 @@
  * is fixed no matter how large the document is. Rows arrive a page at a time
  * from the Rust side; scrolling near the end of a loaded page pulls the next.
  */
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NodeRow } from "../api";
 import type { Tree, TreeRow } from "../useTree";
+import { ContextMenu } from "./ContextMenu";
 
 const ROW_HEIGHT = 26;
 const OVERSCAN = 10;
@@ -18,6 +19,8 @@ export interface RowActions {
   onEdit: (row: NodeRow, parentId: number) => void;
   onInsert: (row: NodeRow, parentId: number) => void;
   onDelete: (row: NodeRow, parentId: number) => void;
+  onViewRaw: (row: NodeRow) => void;
+  onOpenTab: (row: NodeRow) => void;
 }
 
 interface Props {
@@ -34,6 +37,16 @@ export function TreeView({ tree, actions, selected, onSelect, scrollTo }: Props)
   const [viewport, setViewport] = useState(600);
   const [scrollTop, setScrollTop] = useState(0);
   const handledScroll = useRef(-1);
+  const [menu, setMenu] = useState<{ x: number; y: number; row: NodeRow } | null>(null);
+
+  const openMenu = useCallback(
+    (row: NodeRow, x: number, y: number) => {
+      onSelect(row.id);
+      setMenu({ x, y, row });
+    },
+    [onSelect],
+  );
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -92,6 +105,10 @@ export function TreeView({ tree, actions, selected, onSelect, scrollTo }: Props)
       className="tree"
       ref={scrollRef}
       onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        closeMenu();
+      }}
     >
       <div className="tree-canvas" style={{ height: total * ROW_HEIGHT }}>
         {visible.map((item, offset) => {
@@ -114,6 +131,7 @@ export function TreeView({ tree, actions, selected, onSelect, scrollTo }: Props)
               selected={selected === item.row.id}
               onToggle={tree.toggle}
               onSelect={onSelect}
+              onMenu={openMenu}
               actions={actions}
             />
           );
@@ -124,6 +142,17 @@ export function TreeView({ tree, actions, selected, onSelect, scrollTo }: Props)
           </div>
         )}
       </div>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={closeMenu}
+          items={[
+            { label: "View RAW JSON", onSelect: () => actions.onViewRaw(menu.row) },
+            { label: "Expand in new tab", onSelect: () => actions.onOpenTab(menu.row) },
+          ]}
+        />
+      )}
     </div>
   );
 }
@@ -135,6 +164,7 @@ interface RowProps {
   selected: boolean;
   onToggle: (id: number) => void;
   onSelect: (id: number) => void;
+  onMenu: (row: NodeRow, x: number, y: number) => void;
   actions: RowActions;
 }
 
@@ -145,6 +175,7 @@ const Row = memo(function Row({
   selected,
   onToggle,
   onSelect,
+  onMenu,
   actions,
 }: RowProps) {
   const row = item.row!;
@@ -155,6 +186,11 @@ const Row = memo(function Row({
       className={`row${selected ? " selected" : ""}`}
       style={{ top, height: ROW_HEIGHT }}
       onClick={() => onSelect(row.id)}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onMenu(row, event.clientX, event.clientY);
+      }}
     >
       <span className="indent" style={{ width: item.depth * INDENT }} />
       <button

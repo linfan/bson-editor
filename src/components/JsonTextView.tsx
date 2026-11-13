@@ -7,9 +7,11 @@
  * document still only grows the flat row list by what is unfolded. The list is
  * virtualized, which is what keeps a fully expanded file paintable.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NodeRow } from "../api";
 import type { Tree, TreeRow } from "../useTree";
+import { ContextMenu } from "./ContextMenu";
+import type { RowActions } from "./TreeView";
 
 const LINE_HEIGHT = 22;
 const OVERSCAN = 12;
@@ -21,6 +23,7 @@ interface Props {
   rootPreview: string;
   selected: number | null;
   onSelect: (id: number) => void;
+  actions: RowActions;
   /** Jump to a node once its line exists (search navigation). */
   scrollTo?: { node: number; token: number } | null;
 }
@@ -30,6 +33,8 @@ interface TextLine {
   indent: number;
   /** The node this line selects and folds, when it has one. */
   node: number | null;
+  /** The row behind the line, for the context menu. */
+  row: NodeRow | null;
   /** Set on the "more rows" sentinel, so scrolling can pull the next page. */
   parentId: number | null;
   foldable: boolean;
@@ -47,12 +52,23 @@ export function JsonTextView({
   rootPreview,
   selected,
   onSelect,
+  actions,
   scrollTo,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState(600);
   const [scrollTop, setScrollTop] = useState(0);
   const handledScroll = useRef(-1);
+  const [menu, setMenu] = useState<{ x: number; y: number; row: NodeRow } | null>(null);
+
+  const openMenu = useCallback(
+    (row: NodeRow, x: number, y: number) => {
+      onSelect(row.id);
+      setMenu({ x, y, row });
+    },
+    [onSelect],
+  );
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -107,6 +123,10 @@ export function JsonTextView({
       className="jsonview"
       ref={scrollRef}
       onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        closeMenu();
+      }}
     >
       <div className="json-canvas" style={{ height: total * LINE_HEIGHT }}>
         {lines.slice(start, end).map((line, offset) => {
@@ -118,6 +138,12 @@ export function JsonTextView({
               className={`json-line${isSelected ? " selected" : ""}${line.more ? " more" : ""}`}
               style={{ top, height: LINE_HEIGHT }}
               onClick={() => line.node !== null && onSelect(line.node)}
+              onContextMenu={(event) => {
+                if (line.row === null) return;
+                event.preventDefault();
+                event.stopPropagation();
+                openMenu(line.row, event.clientX, event.clientY);
+              }}
             >
               <span className="indent" style={{ width: line.indent * INDENT }} />
               <button
@@ -142,6 +168,17 @@ export function JsonTextView({
           </div>
         )}
       </div>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={closeMenu}
+          items={[
+            { label: "View RAW JSON", onSelect: () => actions.onViewRaw(menu.row) },
+            { label: "Expand in new tab", onSelect: () => actions.onOpenTab(menu.row) },
+          ]}
+        />
+      )}
     </div>
   );
 }
@@ -167,6 +204,7 @@ function buildLines(
       key: `close-${top.node}-${closeSeq++}`,
       indent: top.indent,
       node: null,
+      row: null,
       parentId: null,
       foldable: false,
       open: false,
@@ -184,6 +222,7 @@ function buildLines(
         key: "root",
         indent: 0,
         node: null,
+        row: null,
         parentId: null,
         foldable: false,
         open: false,
@@ -202,6 +241,7 @@ function buildLines(
     key: "root-open",
     indent: 0,
     node: null,
+    row: null,
     parentId: null,
     foldable: false,
     open: true,
@@ -221,6 +261,7 @@ function buildLines(
         key: item.key,
         indent: depth,
         node: null,
+        row: null,
         parentId: item.parentId,
         foldable: false,
         open: false,
@@ -245,6 +286,7 @@ function buildLines(
         key: `${item.key}-open`,
         indent: depth,
         node: row.id,
+        row,
         parentId: item.parentId,
         foldable: true,
         open: true,
@@ -261,6 +303,7 @@ function buildLines(
         key: item.key,
         indent: depth,
         node: row.id,
+        row,
         parentId: item.parentId,
         foldable: row.expandable,
         open: false,
@@ -275,6 +318,7 @@ function buildLines(
         key: item.key,
         indent: depth,
         node: row.id,
+        row,
         parentId: item.parentId,
         foldable: false,
         open: false,
@@ -291,6 +335,7 @@ function buildLines(
     key: "root-close",
     indent: 0,
     node: null,
+    row: null,
     parentId: null,
     foldable: false,
     open: false,

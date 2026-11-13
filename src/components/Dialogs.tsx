@@ -17,6 +17,8 @@ export function Modal({
   children,
   wide,
   diff,
+  raw,
+  closeLabel,
 }: {
   title: string;
   subtitle?: string;
@@ -25,6 +27,9 @@ export function Modal({
   wide?: boolean;
   /** The comparison view needs the full window width, not a dialog width. */
   diff?: boolean;
+  /** A large read-only viewer, taller than an ordinary dialog. */
+  raw?: boolean;
+  closeLabel?: string;
 }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -42,7 +47,7 @@ export function Modal({
       }}
     >
       <div
-        className={`modal${wide ? " wide" : ""}${diff ? " diff" : ""}`}
+        className={`modal${wide ? " wide" : ""}${diff ? " diff" : ""}${raw ? " raw" : ""}`}
         role="dialog"
         aria-modal="true"
       >
@@ -52,7 +57,7 @@ export function Modal({
             {subtitle && <p className="subtitle">{subtitle}</p>}
           </div>
           <button className="quiet" onClick={onClose}>
-            Cancel
+            {closeLabel ?? "Cancel"}
           </button>
         </header>
         {children}

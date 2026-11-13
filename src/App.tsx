@@ -15,7 +15,9 @@ import { ConfirmDialog, NodeDialog, PasteDialog } from "./components/Dialogs";
 import type { NodeSubmission } from "./components/Dialogs";
 import { DiffDialog } from "./components/DiffDialog";
 import { JsonTextView } from "./components/JsonTextView";
+import { RawDialog } from "./components/RawDialog";
 import { TreeView } from "./components/TreeView";
+import type { RowActions } from "./components/TreeView";
 import { bytes } from "./format";
 import { useTree } from "./useTree";
 import type { Tree } from "./useTree";
@@ -40,6 +42,8 @@ const DEFAULT_DEPTH = 3;
 interface Tab {
   id: number;
   info: DocInfo;
+  /** Name shown in the strip; set for a node opened into its own tab. */
+  label: string | null;
   /** Bumped when the document is rebuilt and cached pages must be dropped. */
   generation: number;
   /** Last depth the user asked for; the document reports its own after a load. */
@@ -65,6 +69,7 @@ type Dialog =
     }
   | { kind: "insert"; tab: number; row: NodeRow; parentId: number }
   | { kind: "delete"; tab: number; row: NodeRow; parentId: number }
+  | { kind: "raw"; tab: number; row: NodeRow }
   | { kind: "close"; tab: number }
   | null;
 
@@ -133,12 +138,13 @@ export default function App() {
     );
   }, []);
 
-  const addTab = useCallback((opened: TabInfo) => {
+  const addTab = useCallback((opened: TabInfo, label: string | null = null) => {
     setTabs((prev) => [
       ...prev,
       {
         id: opened.tab,
         info: opened.info,
+        label,
         generation: 0,
         depth: opened.info.expandDepth,
         selected: null,
@@ -161,6 +167,7 @@ export default function App() {
           open.map((item) => ({
             id: item.tab,
             info: item.info,
+            label: null,
             generation: 0,
             depth: item.info.expandDepth,
             selected: null,
@@ -316,6 +323,20 @@ export default function App() {
       }
     },
     [fail, toClipboard],
+  );
+
+  /** Load one node's subtree as a document of its own in a new tab. */
+  const onOpenNodeTab = useCallback(
+    async (tabId: number, row: NodeRow) => {
+      try {
+        const text = await api.copySubtree(tabId, row.id, copyJson);
+        const opened = await api.loadText(text, openOptions(DEFAULT_DEPTH));
+        addTab(opened, row.key ?? `[${row.index}]`);
+      } catch (cause) {
+        fail(cause);
+      }
+    },
+    [addTab, fail, openOptions],
   );
 
   const onEditRow = useCallback(
@@ -519,13 +540,15 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [activeId, dialog, findOpen, onOpen, onSave, tabs]);
 
-  const actionsFor = (tabId: number) => ({
+  const actionsFor = (tabId: number): RowActions => ({
     onCopy: (row: NodeRow) => void onCopyRow(tabId, row),
     onEdit: (row: NodeRow, parentId: number) => void onEditRow(tabId, row, parentId),
     onInsert: (row: NodeRow, parentId: number) =>
       setDialog({ kind: "insert", tab: tabId, row, parentId }),
     onDelete: (row: NodeRow, parentId: number) =>
       setDialog({ kind: "delete", tab: tabId, row, parentId }),
+    onViewRaw: (row: NodeRow) => setDialog({ kind: "raw", tab: tabId, row }),
+    onOpenTab: (row: NodeRow) => void onOpenNodeTab(tabId, row),
   });
 
   return (
@@ -635,6 +658,9 @@ export default function App() {
           onConfirm={() => void onConfirmDelete()}
         />
       )}
+      {dialog?.kind === "raw" && (
+        <RawDialog tab={dialog.tab} row={dialog.row} onClose={() => setDialog(null)} />
+      )}
       {diffOpen && tabs.length > 1 && (
         <DiffDialog
           tabs={tabs.map((tab) => ({ id: tab.id, info: tab.info }))}
@@ -672,12 +698,7 @@ function TabPanel({
 }: {
   tab: Tab;
   trees: { current: Map<number, Tree> };
-  actions: {
-    onCopy: (row: NodeRow, parentId: number) => void;
-    onEdit: (row: NodeRow, parentId: number) => void;
-    onInsert: (row: NodeRow, parentId: number) => void;
-    onDelete: (row: NodeRow, parentId: number) => void;
-  };
+  actions: RowActions;
   scrollTo: { node: number; token: number } | null;
   onSelect: (id: number | null) => void;
 }) {
@@ -701,6 +722,7 @@ function TabPanel({
           rootPreview={tab.info.rootPreview}
           selected={tab.selected}
           onSelect={onSelect}
+          actions={actions}
           scrollTo={scrollTo}
         />
       )}

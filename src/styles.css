@@ -273,6 +273,33 @@ textarea {
   border-color: transparent;
 }
 
+/* Right-click menu, portalled to the body so the tree's scrolling cannot clip
+   it. The position is set inline from the pointer coordinates. */
+.ctxmenu {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 190px;
+  padding: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px #0009;
+}
+
+.ctxmenu button {
+  padding: 6px 9px;
+  text-align: left;
+  background: transparent;
+  border-color: transparent;
+}
+
+.ctxmenu button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: transparent;
+}
+
 /* ------------------------------------------------------------------ panes */
 
 .panes {
@@ -773,6 +800,65 @@ textarea {
 .modal.diff {
   width: min(1240px, calc(100vw - 32px));
   height: min(780px, calc(100vh - 48px));
+}
+
+.modal.raw {
+  width: min(1100px, calc(100vw - 48px));
+  height: min(820px, calc(100vh - 64px));
+}
+
+.raw-body {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  background: #101317;
+  color: var(--text);
+  font: 12px/1.55 var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  tab-size: 4;
+  user-select: text;
+}
+
+.raw-note {
+  margin: 0;
+  padding: 16px 14px;
+  color: var(--text-faint);
+}
+
+.raw-hint {
+  margin: 0;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--warn);
+  font-size: 11px;
+}
+
+.hl-key {
+  color: var(--accent);
+}
+
+.hl-string {
+  color: var(--string);
+}
+
+.hl-number {
+  color: var(--number);
+}
+
+.hl-bool {
+  color: var(--bool);
+}
+
+.hl-null {
+  color: var(--null);
+  font-style: italic;
+}
+
+.hl-punct {
+  color: var(--text-dim);
 }
 
 /* -------------------------------------------------------------------- diff */
