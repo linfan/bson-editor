@@ -187,19 +187,11 @@ export function Toolbar({
         </button>
       </div>
 
-      <div className="group tree">
-        <button
-          onClick={onExpandAll}
-          disabled={!info || view !== "tree"}
-          title="Expand every container"
-        >
+      <div className="group expand">
+        <button onClick={onExpandAll} disabled={!info} title="Expand every container">
           Expand all
         </button>
-        <button
-          onClick={onCollapseAll}
-          disabled={!info || view !== "tree"}
-          title="Collapse every container"
-        >
+        <button onClick={onCollapseAll} disabled={!info} title="Collapse every container">
           Collapse all
         </button>
       </div>
