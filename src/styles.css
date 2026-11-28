@@ -822,6 +822,17 @@ textarea {
   user-select: text;
 }
 
+.raw-body .raw-match {
+  padding: 0;
+  background: #66551f;
+  color: inherit;
+}
+
+.raw-body .raw-match.active {
+  background: #9a6a19;
+  outline: 1px solid var(--accent);
+}
+
 .raw-note {
   margin: 0;
   padding: 16px 14px;
